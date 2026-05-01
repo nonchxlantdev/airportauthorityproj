@@ -57,7 +57,6 @@ const jobFormDefaults = {
   dueDate: '',
   startDate: '',
   approvalStatus: 'Not Submitted',
-  attachments: '',
   comments: ''
 };
 
@@ -124,6 +123,10 @@ function userToSession(user) {
   };
 }
 
+function displayUserName(user) {
+  return `${user.firstName} ${user.lastName}`.trim() || user.email || 'System';
+}
+
 function profileFromRow(row) {
   return {
     id: row.id,
@@ -158,6 +161,8 @@ function jobFromRow(row, history = []) {
     dueDate: row.due_date || '',
     completionDate: row.completion_date || '',
     attachments: Array.isArray(row.attachments) ? row.attachments : [],
+    createdById: row.created_by || '',
+    lastUpdatedById: row.last_updated_by || '',
     createdBy: row.created_by_name || 'System',
     lastUpdatedBy: row.last_updated_by_name || 'System',
     lastUpdated: formatDateTime(new Date(row.updated_at)),
@@ -172,6 +177,55 @@ function historyFromRow(row) {
     at: formatDateTime(new Date(row.created_at)),
     note: row.note || ''
   };
+}
+
+function attachmentName(attachment) {
+  return typeof attachment === 'string' ? attachment : attachment.name;
+}
+
+function attachmentUrl(attachment) {
+  return typeof attachment === 'string' ? '' : attachment.url;
+}
+
+function enrichJobsWithUsers(jobs, users) {
+  const usersById = users.reduce((grouped, user) => {
+    grouped[user.id] = user;
+    return grouped;
+  }, {});
+
+  return jobs.map((job) => ({
+    ...job,
+    createdBy: usersById[job.createdById] ? displayUserName(usersById[job.createdById]) : job.createdBy,
+    lastUpdatedBy: usersById[job.lastUpdatedById] ? displayUserName(usersById[job.lastUpdatedById]) : job.lastUpdatedBy
+  }));
+}
+
+async function uploadJobAttachments(jobId, files = []) {
+  const selectedFiles = Array.from(files).filter((file) => ['image/jpeg', 'image/png'].includes(file.type));
+
+  if (!selectedFiles.length) return [];
+
+  const uploadedFiles = [];
+
+  for (const file of selectedFiles) {
+    const safeName = file.name.replace(/[^a-z0-9._-]/gi, '-').toLowerCase();
+    const filePath = `${jobId}/${crypto.randomUUID()}-${safeName}`;
+    const { error } = await supabase.storage
+      .from('job-attachments')
+      .upload(filePath, file, { contentType: file.type, upsert: false });
+
+    if (error) throw error;
+
+    const { data } = supabase.storage.from('job-attachments').getPublicUrl(filePath);
+    uploadedFiles.push({
+      name: file.name,
+      url: data.publicUrl,
+      path: filePath,
+      type: file.type
+    });
+  }
+
+  return uploadedFiles;
 }
 
 function LoginPage({ onLogin }) {
@@ -241,6 +295,7 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
   const [activeView, setActiveView] = useState(capabilities.canViewAllJobs ? 'dashboard' : 'my-tasks');
   const [selectedJob, setSelectedJob] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [dashboardFilter, setDashboardFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState({
     mode: 'single',
     startDate: new Date().toISOString().slice(0, 10),
@@ -249,12 +304,21 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
 
   const visibleJobs = capabilities.canViewAllJobs ? jobs : jobs.filter((job) => job.assignedUserId === currentUser.id);
   const dashboardData = useMemo(() => buildDashboardData(visibleJobs), [visibleJobs]);
+  const dashboardJobs = useMemo(() => filterJobsByMetric(visibleJobs, dashboardFilter), [visibleJobs, dashboardFilter]);
 
-  async function handleCreateJob(formData) {
+  async function handleCreateJob(formData, attachmentFiles = []) {
     const assignedUser = users.find((user) => user.id === formData.assignedUserId);
     const jobId = `BAC-${new Date().getFullYear()}-${String(jobs.length + 1).padStart(3, '0')}`;
-    const attachments = formData.attachments ? formData.attachments.split(',').map((item) => item.trim()).filter(Boolean) : [];
     const completionDate = formData.status === 'Completed' ? new Date().toISOString().slice(0, 10) : '';
+    let attachments = [];
+
+    try {
+      attachments = await uploadJobAttachments(jobId, attachmentFiles);
+    } catch (error) {
+      window.alert(error.message);
+      return false;
+    }
+
     const historyItem = {
       title: 'Job created',
       by: currentUser.name,
@@ -285,7 +349,7 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
 
     if (error) {
       window.alert(error.message);
-      return;
+      return false;
     }
 
     await supabase.from('job_history').insert({
@@ -300,6 +364,8 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
       ...formData,
       id: jobId,
       area: areas[0],
+      createdById: currentUser.id,
+      lastUpdatedById: currentUser.id,
       createdBy: currentUser.name,
       assignedTo: assignedUser ? `${assignedUser.firstName} ${assignedUser.lastName}` : 'Unassigned',
       assignedUserInitials: assignedUser ? assignedUser.initials : 'UA',
@@ -313,6 +379,86 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
     setJobs((currentJobs) => [nextJob, ...currentJobs]);
     setSelectedJob(nextJob);
     setActiveView('jobs');
+    return true;
+  }
+
+  async function handleUpdateJob(jobId, formData, attachmentFiles = [], existingAttachments = []) {
+    const assignedUser = users.find((user) => user.id === formData.assignedUserId);
+    let uploadedAttachments = [];
+
+    try {
+      uploadedAttachments = await uploadJobAttachments(jobId, attachmentFiles);
+    } catch (error) {
+      window.alert(error.message);
+      return false;
+    }
+
+    const attachments = [...existingAttachments, ...uploadedAttachments];
+    const completionDate = formData.status === 'Completed' ? (formData.completionDate || new Date().toISOString().slice(0, 10)) : '';
+    const updatePayload = {
+      title: formData.title,
+      description: formData.description,
+      department: formData.department,
+      location: formData.location,
+      assigned_user_id: formData.assignedUserId || null,
+      assigned_to: assignedUser ? `${assignedUser.firstName} ${assignedUser.lastName}` : 'Unassigned',
+      assigned_user_initials: assignedUser ? assignedUser.initials : 'UA',
+      priority: formData.priority,
+      status: formData.status,
+      approval_status: formData.approvalStatus,
+      start_date: formData.startDate || null,
+      due_date: formData.dueDate || null,
+      completion_date: completionDate || null,
+      attachments,
+      last_updated_by: currentUser.id
+    };
+
+    const { error } = await supabase.from('jobs').update(updatePayload).eq('id', jobId);
+
+    if (error) {
+      window.alert(error.message);
+      return false;
+    }
+
+    await supabase.from('job_history').insert({
+      job_id: jobId,
+      title: 'Job details updated',
+      note: 'Task fields or attachments were edited.',
+      actor_id: currentUser.id,
+      actor_name: currentUser.name
+    });
+
+    setJobs((currentJobs) => currentJobs.map((job) => {
+      if (job.id !== jobId) return job;
+
+      const updatedJob = {
+        ...job,
+        ...formData,
+        assignedTo: assignedUser ? `${assignedUser.firstName} ${assignedUser.lastName}` : 'Unassigned',
+        assignedUserInitials: assignedUser ? assignedUser.initials : 'UA',
+        completionDate,
+        attachments,
+        lastUpdated: formatDateTime(),
+        lastUpdatedBy: currentUser.name,
+        lastUpdatedById: currentUser.id,
+        history: [
+          {
+            title: 'Job details updated',
+            by: currentUser.name,
+            at: formatDateTime(),
+            note: 'Task fields or attachments were edited.'
+          },
+          ...job.history
+        ]
+      };
+
+      setSelectedJob((currentSelectedJob) => (
+        currentSelectedJob?.id === jobId ? updatedJob : currentSelectedJob
+      ));
+
+      return updatedJob;
+    }));
+    return true;
   }
 
   async function handleCreateUser(formData) {
@@ -470,7 +616,7 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
           {activeView === 'dashboard' && (
             <DashboardView
               dashboardData={dashboardData}
-              jobs={visibleJobs}
+              jobs={dashboardJobs}
               onCreateJob={() => setActiveView('create-job')}
               onViewJob={(job) => setSelectedJob(job)}
               searchTerm={searchTerm}
@@ -478,6 +624,8 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
               canCreateJobs={capabilities.canCreateJobs}
               dateFilter={dateFilter}
               setDateFilter={setDateFilter}
+              selectedMetricFilter={dashboardFilter}
+              onSelectMetricFilter={setDashboardFilter}
             />
           )}
           {activeView === 'my-tasks' && (
@@ -523,6 +671,9 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
           job={selectedJob}
           currentUser={currentUser}
           canUpdateStatus={capabilities.canViewAllJobs || selectedJob.assignedUserId === currentUser.id}
+          canEditJob={currentUser.role === 'System Administrator' || selectedJob.createdById === currentUser.id}
+          users={users}
+          onUpdateJob={handleUpdateJob}
           onUpdateStatus={handleUpdateJobStatus}
           onClose={() => setSelectedJob(null)}
         />
@@ -596,7 +747,11 @@ function TopBar({ activeView, currentUser, onLogout }) {
   );
 }
 
-function DashboardView({ dashboardData, jobs, onCreateJob, onViewJob, searchTerm, setSearchTerm, canCreateJobs, dateFilter, setDateFilter }) {
+function DashboardView({ dashboardData, jobs, onCreateJob, onViewJob, searchTerm, setSearchTerm, canCreateJobs, dateFilter, setDateFilter, selectedMetricFilter, onSelectMetricFilter }) {
+  const title = selectedMetricFilter === 'all'
+    ? 'Recent Jobs'
+    : dashboardData.metrics.find((metric) => metric.filterKey === selectedMetricFilter)?.label || 'Recent Jobs';
+
   return (
     <>
       <PageHeading
@@ -604,7 +759,7 @@ function DashboardView({ dashboardData, jobs, onCreateJob, onViewJob, searchTerm
         description="Live overview for Philip S. W. Goldson International Airport"
         action={<ActionButtons onCreateJob={onCreateJob} canCreateJobs={canCreateJobs} dateFilter={dateFilter} setDateFilter={setDateFilter} />}
       />
-      <MetricGrid metrics={dashboardData.metrics} />
+      <MetricGrid metrics={dashboardData.metrics} selectedMetricFilter={selectedMetricFilter} onSelectMetricFilter={onSelectMetricFilter} />
       <ChartGrid dashboardData={dashboardData} />
       <section className="dashboard-lower">
         <RecentJobs
@@ -614,6 +769,7 @@ function DashboardView({ dashboardData, jobs, onCreateJob, onViewJob, searchTerm
           searchTerm={searchTerm}
           setSearchTerm={setSearchTerm}
           canCreateJobs={canCreateJobs}
+          title={title}
         />
         <aside className="right-rail">
           <OverdueJobs jobs={dashboardData.overdueJobs} onViewJob={onViewJob} />
@@ -761,20 +917,26 @@ function DateRangeControl({ dateFilter, setDateFilter }) {
   );
 }
 
-function MetricGrid({ metrics }) {
+function MetricGrid({ metrics, selectedMetricFilter = 'all', onSelectMetricFilter }) {
   return (
     <section className="metric-grid">
       {metrics.map((card) => {
         const Icon = card.icon;
+        const isActive = selectedMetricFilter === card.filterKey;
         return (
-          <article className={`metric-card ${card.tone}`} key={card.label}>
+          <button
+            className={`metric-card metric-button ${card.tone}${isActive ? ' selected' : ''}`}
+            key={card.label}
+            type="button"
+            onClick={() => onSelectMetricFilter?.(isActive ? 'all' : card.filterKey)}
+          >
             <div className="metric-icon"><Icon size={27} /></div>
             <div>
               <span>{card.label}</span>
               <strong>{card.value}</strong>
               <p>{card.hint}</p>
             </div>
-          </article>
+          </button>
         );
       })}
     </section>
@@ -827,9 +989,16 @@ function ChartCard({ title, stats }) {
 }
 
 function RecentJobs({ jobs, onCreateJob, onViewJob, searchTerm, setSearchTerm, canCreateJobs = true, title = 'Recent Jobs', emptyTitle = 'No jobs yet', emptyDescription = 'Create the first job to test the workflow live.' }) {
+  const [departmentFilter, setDepartmentFilter] = useState('All Departments');
+  const [statusFilter, setStatusFilter] = useState('All Statuses');
+  const [areaFilter, setAreaFilter] = useState(areas[0]);
   const visibleJobs = jobs.filter((job) => {
     const target = `${job.id} ${job.title} ${job.department} ${job.location} ${job.assignedTo}`.toLowerCase();
-    return target.includes(searchTerm.toLowerCase());
+    const matchesSearch = target.includes(searchTerm.toLowerCase());
+    const matchesDepartment = departmentFilter === 'All Departments' || job.department === departmentFilter;
+    const matchesStatus = statusFilter === 'All Statuses' || job.status === statusFilter;
+    const matchesArea = areaFilter === areas[0] || job.area === areaFilter;
+    return matchesSearch && matchesDepartment && matchesStatus && matchesArea;
   });
 
   return (
@@ -837,15 +1006,15 @@ function RecentJobs({ jobs, onCreateJob, onViewJob, searchTerm, setSearchTerm, c
       <div className="panel-header jobs-header">
         <h2>{title}</h2>
         <div className="filters">
-          <select aria-label="Department filter" defaultValue="All Departments">
+          <select aria-label="Department filter" value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)}>
             <option>All Departments</option>
             {departments.map((department) => <option key={department}>{department}</option>)}
           </select>
-          <select aria-label="Status filter" defaultValue="All Statuses">
+          <select aria-label="Status filter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
             <option>All Statuses</option>
             {statuses.map((status) => <option key={status}>{status}</option>)}
           </select>
-          <select aria-label="Area filter" defaultValue={areas[0]}>
+          <select aria-label="Area filter" value={areaFilter} onChange={(event) => setAreaFilter(event.target.value)}>
             {areas.map((area) => <option key={area}>{area}</option>)}
           </select>
           <label className="search-box">
@@ -904,15 +1073,29 @@ function RecentJobs({ jobs, onCreateJob, onViewJob, searchTerm, setSearchTerm, c
 
 function CreateJobView({ users, onCreateJob }) {
   const [formData, setFormData] = useState(jobFormDefaults);
+  const [attachmentFiles, setAttachmentFiles] = useState([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   function updateField(field, value) {
     setFormData((current) => ({ ...current, [field]: value }));
   }
 
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setIsSubmitting(true);
+    const wasCreated = await onCreateJob(formData, attachmentFiles);
+    if (wasCreated) {
+      setFormData(jobFormDefaults);
+      setAttachmentFiles([]);
+      event.target.reset();
+    }
+    setIsSubmitting(false);
+  }
+
   return (
     <>
       <PageHeading title="Create New Job" description="Add a live job record for Philip S. W. Goldson International Airport" />
-      <form className="panel form-panel" onSubmit={(event) => { event.preventDefault(); onCreateJob(formData); setFormData(jobFormDefaults); }}>
+      <form className="panel form-panel" onSubmit={handleSubmit}>
         <div className="form-grid">
           <label className="wide-field">
             Job title
@@ -982,8 +1165,13 @@ function CreateJobView({ users, onCreateJob }) {
             </select>
           </label>
           <label>
-            Attachments
-            <input value={formData.attachments} onChange={(event) => updateField('attachments', event.target.value)} placeholder="File names separated by commas" />
+            Photo attachments
+            <input
+              type="file"
+              accept="image/jpeg,image/png"
+              multiple
+              onChange={(event) => setAttachmentFiles(Array.from(event.target.files || []))}
+            />
           </label>
           <label className="wide-field">
             Description
@@ -995,7 +1183,10 @@ function CreateJobView({ users, onCreateJob }) {
           </label>
         </div>
         <div className="form-actions">
-          <button className="primary-button fit-button" type="submit"><CirclePlus size={18} /> Create Job</button>
+          <button className="primary-button fit-button" type="submit" disabled={isSubmitting}>
+            <CirclePlus size={18} />
+            {isSubmitting ? 'Creating Job...' : 'Create Job'}
+          </button>
         </div>
       </form>
     </>
@@ -1005,7 +1196,14 @@ function CreateJobView({ users, onCreateJob }) {
 function UsersView({ users, jobs, onCreateUser, onUpdateUser, onViewJob }) {
   const [formData, setFormData] = useState(userFormDefaults);
   const [editingUserId, setEditingUserId] = useState(null);
+  const [mode, setMode] = useState('list');
+  const [userSearch, setUserSearch] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const isEditing = Boolean(editingUserId);
+  const filteredUsers = users.filter((user) => {
+    const target = `${user.firstName} ${user.lastName} ${user.email} ${user.department} ${user.role}`.toLowerCase();
+    return target.includes(userSearch.toLowerCase());
+  });
 
   function updateField(field, value) {
     setFormData((current) => ({ ...current, [field]: value }));
@@ -1013,6 +1211,7 @@ function UsersView({ users, jobs, onCreateUser, onUpdateUser, onViewJob }) {
 
   function startEditUser(user) {
     setEditingUserId(user.id);
+    setMode('form');
     setFormData({
       firstName: user.firstName,
       lastName: user.lastName,
@@ -1029,24 +1228,38 @@ function UsersView({ users, jobs, onCreateUser, onUpdateUser, onViewJob }) {
   function resetForm() {
     setEditingUserId(null);
     setFormData(userFormDefaults);
+    setMode('list');
   }
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
+    setIsSubmitting(true);
 
     if (isEditing) {
-      onUpdateUser(editingUserId, formData);
+      await onUpdateUser(editingUserId, formData);
     } else {
-      onCreateUser(formData);
+      await onCreateUser(formData);
     }
 
+    setIsSubmitting(false);
     resetForm();
   }
 
   return (
     <>
-      <PageHeading title="Users" description="Create users, edit permissions, and reset login access" />
-      <section className="split-layout">
+      <PageHeading
+        title={mode === 'list' ? 'Users' : isEditing ? 'Edit User' : 'Create User'}
+        description={mode === 'list' ? 'Search and manage active airport users' : 'Create users, edit permissions, and reset login access'}
+        action={mode === 'list' ? (
+          <button className="export-button" type="button" onClick={() => { setMode('form'); setEditingUserId(null); setFormData(userFormDefaults); }}>
+            <CirclePlus size={18} />
+            Create User
+          </button>
+        ) : (
+          <button className="secondary-button" type="button" onClick={resetForm}>Back to Users</button>
+        )}
+      />
+      {mode === 'form' ? (
         <form className="panel form-panel" onSubmit={handleSubmit}>
           <div className="panel-header form-title">
             <h2>{isEditing ? 'Edit User' : 'Create User'}</h2>
@@ -1108,18 +1321,25 @@ function UsersView({ users, jobs, onCreateUser, onUpdateUser, onViewJob }) {
             {permissions.slice(0, 6).map((permission) => <span key={permission}>{permission}</span>)}
           </div>
           <div className="form-actions">
-            <button className="primary-button fit-button" type="submit">
+            <button className="primary-button fit-button" type="submit" disabled={isSubmitting}>
               <Users size={18} />
-              {isEditing ? 'Save User Settings' : 'Create User'}
+              {isSubmitting ? 'Saving...' : isEditing ? 'Save User Settings' : 'Create User'}
             </button>
           </div>
         </form>
+      ) : (
         <section className="panel users-list">
-          <div className="panel-header">
+          <div className="panel-header users-panel-header">
             <h2>Created Users</h2>
-            <span className="record-count">{users.length} total</span>
+            <div className="filters">
+              <label className="search-box">
+                <input value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Search users..." />
+                <Search size={16} />
+              </label>
+              <span className="record-count">{filteredUsers.length} total</span>
+            </div>
           </div>
-          {users.length ? users.map((user) => (
+          {filteredUsers.length ? filteredUsers.map((user) => (
             <UserSummaryCard
               user={user}
               jobs={jobs.filter((job) => job.assignedUserId === user.id)}
@@ -1128,10 +1348,10 @@ function UsersView({ users, jobs, onCreateUser, onUpdateUser, onViewJob }) {
               key={user.id}
             />
           )) : (
-            <EmptyState title="No users yet" description="Create a user, then assign them to a new job." compact />
+            <EmptyState title="No matching users" description="Adjust the search or create a new user." compact />
           )}
         </section>
-      </section>
+      )}
     </>
   );
 }
@@ -1177,18 +1397,54 @@ function UserSummaryCard({ user, jobs, onEditUser, onViewJob }) {
   );
 }
 
-function JobDetailsDrawer({ job, currentUser, canUpdateStatus, onUpdateStatus, onClose }) {
+function jobToFormData(job) {
+  return {
+    title: job.title || '',
+    description: job.description || '',
+    department: job.department || 'Operations',
+    location: job.location || 'Terminal 1',
+    assignedUserId: job.assignedUserId || '',
+    priority: job.priority || 'Medium',
+    status: job.status || 'Pending',
+    dueDate: job.dueDate || '',
+    startDate: job.startDate || '',
+    completionDate: job.completionDate || '',
+    approvalStatus: job.approvalStatus || 'Not Submitted',
+    comments: ''
+  };
+}
+
+function JobDetailsDrawer({ job, currentUser, canUpdateStatus, canEditJob, users, onUpdateJob, onUpdateStatus, onClose }) {
   const [statusValue, setStatusValue] = useState(job.status);
   const [statusNote, setStatusNote] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [editData, setEditData] = useState(() => jobToFormData(job));
+  const [editFiles, setEditFiles] = useState([]);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     setStatusValue(job.status);
     setStatusNote('');
+    setEditData(jobToFormData(job));
+    setEditFiles([]);
+    setIsEditing(false);
   }, [job.id, job.status]);
 
   function handleStatusSubmit(event) {
     event.preventDefault();
     onUpdateStatus(job.id, statusValue, statusNote);
+  }
+
+  function updateEditField(field, value) {
+    setEditData((current) => ({ ...current, [field]: value }));
+  }
+
+  async function handleEditSubmit(event) {
+    event.preventDefault();
+    setIsSaving(true);
+    const wasUpdated = await onUpdateJob(job.id, editData, editFiles, job.attachments);
+    setIsSaving(false);
+    if (wasUpdated) setIsEditing(false);
   }
 
   return (
@@ -1199,8 +1455,96 @@ function JobDetailsDrawer({ job, currentUser, canUpdateStatus, onUpdateStatus, o
             <span className="job-id">{job.id}</span>
             <h2>{job.title}</h2>
           </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label="Close job details"><X size={20} /></button>
+          <div className="drawer-actions">
+            {canEditJob && (
+              <button className="secondary-button icon-text-button" type="button" onClick={() => setIsEditing((current) => !current)}>
+                <Pencil size={14} />
+                {isEditing ? 'Cancel' : 'Edit'}
+              </button>
+            )}
+            <button className="icon-button" type="button" onClick={onClose} aria-label="Close job details"><X size={20} /></button>
+          </div>
         </div>
+        {isEditing && (
+          <section className="detail-section status-update-panel">
+            <h3>Edit Job</h3>
+            <form className="drawer-edit-form" onSubmit={handleEditSubmit}>
+              <label className="wide-field">
+                Job title
+                <input required value={editData.title} onChange={(event) => updateEditField('title', event.target.value)} />
+              </label>
+              <label>
+                Department
+                <select value={editData.department} onChange={(event) => updateEditField('department', event.target.value)}>
+                  {departments.map((department) => <option key={department}>{department}</option>)}
+                </select>
+              </label>
+              <label>
+                Specific location
+                <select value={editData.location} onChange={(event) => updateEditField('location', event.target.value)}>
+                  <option>Terminal 1</option>
+                  <option>Terminal 2</option>
+                  <option>Cargo Area</option>
+                  <option>Runway / Apron</option>
+                  <option>Parking Area</option>
+                  <option>VIP Lounge</option>
+                  <option>Immigration Area</option>
+                  <option>Customs Area</option>
+                  <option>Restrooms</option>
+                  <option>Other Airport Location</option>
+                </select>
+              </label>
+              <label>
+                Assign to
+                <select value={editData.assignedUserId} onChange={(event) => updateEditField('assignedUserId', event.target.value)}>
+                  <option value="">Unassigned</option>
+                  {users.map((user) => <option key={user.id} value={user.id}>{user.firstName} {user.lastName} - {user.department}</option>)}
+                </select>
+              </label>
+              <label>
+                Priority
+                <select value={editData.priority} onChange={(event) => updateEditField('priority', event.target.value)}>
+                  {priorities.map((priority) => <option key={priority}>{priority}</option>)}
+                </select>
+              </label>
+              <label>
+                Status
+                <select value={editData.status} onChange={(event) => updateEditField('status', event.target.value)}>
+                  {statuses.map((status) => <option key={status}>{status}</option>)}
+                </select>
+              </label>
+              <label>
+                Start date
+                <input type="date" value={editData.startDate} onChange={(event) => updateEditField('startDate', event.target.value)} />
+              </label>
+              <label>
+                Due date
+                <input type="date" value={editData.dueDate} onChange={(event) => updateEditField('dueDate', event.target.value)} />
+              </label>
+              <label>
+                Approval status
+                <select value={editData.approvalStatus} onChange={(event) => updateEditField('approvalStatus', event.target.value)}>
+                  <option>Not Submitted</option>
+                  <option>Pending Approval</option>
+                  <option>Approved</option>
+                  <option>Rejected</option>
+                </select>
+              </label>
+              <label>
+                Add photo attachments
+                <input type="file" accept="image/jpeg,image/png" multiple onChange={(event) => setEditFiles(Array.from(event.target.files || []))} />
+              </label>
+              <label className="wide-field">
+                Description
+                <textarea required value={editData.description} onChange={(event) => updateEditField('description', event.target.value)} />
+              </label>
+              <button className="primary-button fit-button" type="submit" disabled={isSaving}>
+                <CheckCircle2 size={18} />
+                {isSaving ? 'Saving...' : 'Save Job'}
+              </button>
+            </form>
+          </section>
+        )}
         <div className="detail-grid">
           <Detail label="Department" value={job.department} />
           <Detail label="Area" value={job.area} />
@@ -1246,7 +1590,14 @@ function JobDetailsDrawer({ job, currentUser, canUpdateStatus, onUpdateStatus, o
           <h3>Attachments</h3>
           {job.attachments.length ? (
             <ul className="attachment-list">
-              {job.attachments.map((attachment) => <li key={attachment}><Paperclip size={15} /> {attachment}</li>)}
+              {job.attachments.map((attachment) => (
+                <li key={attachmentUrl(attachment) || attachmentName(attachment)}>
+                  <Paperclip size={15} />
+                  {attachmentUrl(attachment) ? (
+                    <a href={attachmentUrl(attachment)} target="_blank" rel="noreferrer">{attachmentName(attachment)}</a>
+                  ) : attachmentName(attachment)}
+                </li>
+              ))}
             </ul>
           ) : <p>No attachments added.</p>}
         </section>
@@ -1382,16 +1733,27 @@ function buildDashboardData(jobs) {
 
   return {
     metrics: [
-      { label: 'Pending Jobs', value: jobs.filter((job) => job.status === 'Pending').length, hint: 'Awaiting start or assignment', tone: 'pending', icon: CalendarDays },
-      { label: 'Completed Today', value: completedToday.length, hint: 'Completed with today as completion date', tone: 'complete', icon: CheckCircle2 },
-      { label: 'Delayed Jobs', value: jobs.filter((job) => job.status === 'Delayed').length + overdueJobs.length, hint: 'Delayed or past due', tone: 'delayed', icon: ShieldAlert },
-      { label: 'Total Active Jobs', value: activeJobs.length, hint: 'Open work across airport operations', tone: 'active', icon: BriefcaseBusiness }
+      { label: 'Pending Jobs', value: jobs.filter((job) => job.status === 'Pending').length, hint: 'Awaiting start or assignment', tone: 'pending', icon: CalendarDays, filterKey: 'pending' },
+      { label: 'Completed Today', value: completedToday.length, hint: 'Completed with today as completion date', tone: 'complete', icon: CheckCircle2, filterKey: 'completed-today' },
+      { label: 'Delayed Jobs', value: jobs.filter((job) => job.status === 'Delayed').length + overdueJobs.length, hint: 'Delayed or past due', tone: 'delayed', icon: ShieldAlert, filterKey: 'delayed' },
+      { label: 'Total Active Jobs', value: activeJobs.length, hint: 'Open work across airport operations', tone: 'active', icon: BriefcaseBusiness, filterKey: 'active' }
     ],
     departmentStats: buildStats(jobs, departments, 'department', ['#1f73dc', '#5bc5d8', '#ffd34d', '#7ad2bd', '#8cc9a8', '#657483', '#9f7aea', '#f97316', '#14b8a6', '#ef4444']),
     areaStats: buildStats(jobs, areas, 'area', ['#1f73dc']),
     statusStats: buildStats(jobs, statuses, 'status', ['#ffd34d', '#1f73dc', '#11a879', '#ec4a4a', '#657483']),
     overdueJobs
   };
+}
+
+function filterJobsByMetric(jobs, filterKey) {
+  if (filterKey === 'pending') return jobs.filter((job) => job.status === 'Pending');
+  if (filterKey === 'completed-today') {
+    const today = new Date().toISOString().slice(0, 10);
+    return jobs.filter((job) => job.status === 'Completed' && job.completionDate === today);
+  }
+  if (filterKey === 'delayed') return jobs.filter((job) => job.status === 'Delayed' || isOverdue(job));
+  if (filterKey === 'active') return jobs.filter((job) => !['Completed', 'Cancelled'].includes(job.status));
+  return jobs;
 }
 
 function buildStats(records, labels, field, colors) {
@@ -1458,7 +1820,7 @@ function App() {
   async function refreshData() {
     const [nextUsers, nextJobs] = await Promise.all([loadProfiles(), loadJobs()]);
     setUsers(nextUsers);
-    setJobs(nextJobs);
+    setJobs(enrichJobsWithUsers(nextJobs, nextUsers));
   }
 
   async function handleLogin(email, password) {
