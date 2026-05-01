@@ -242,6 +242,11 @@ button {
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
 }
 
+.logout-nav-item {
+  margin-top: 6px;
+  color: #ffd7d7;
+}
+
 .sidebar-footer {
   display: flex;
   align-items: center;

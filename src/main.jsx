@@ -609,9 +609,9 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
 
   return (
     <div className="app-shell">
-      <Sidebar activeView={activeView} capabilities={capabilities} onNavigate={setActiveView} />
+      <Sidebar activeView={activeView} capabilities={capabilities} onNavigate={setActiveView} onLogout={onLogout} />
       <main className="main-content">
-        <TopBar activeView={activeView} currentUser={currentUser} onLogout={onLogout} />
+        <TopBar activeView={activeView} currentUser={currentUser} />
         <section className="content-pad">
           {activeView === 'dashboard' && (
             <DashboardView
@@ -682,7 +682,7 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
   );
 }
 
-function Sidebar({ activeView, capabilities, onNavigate }) {
+function Sidebar({ activeView, capabilities, onNavigate, onLogout }) {
   const visibleNavItems = navItems.filter((item) => {
     if (item.key === 'create-job') return capabilities.canCreateJobs;
     if (item.key === 'users') return capabilities.canManageUsers;
@@ -713,6 +713,10 @@ function Sidebar({ activeView, capabilities, onNavigate }) {
             </button>
           );
         })}
+        <button className="nav-item logout-nav-item" type="button" onClick={onLogout}>
+          <X size={20} />
+          Log Out
+        </button>
       </nav>
       <div className="sidebar-footer">
         <Plane size={28} />
@@ -722,7 +726,7 @@ function Sidebar({ activeView, capabilities, onNavigate }) {
   );
 }
 
-function TopBar({ activeView, currentUser, onLogout }) {
+function TopBar({ activeView, currentUser }) {
   const title = navItems.find((item) => item.key === activeView)?.label || 'Dashboard';
   return (
     <header className="topbar">
@@ -735,13 +739,13 @@ function TopBar({ activeView, currentUser, onLogout }) {
           <Bell size={21} />
           <span>0</span>
         </button>
-        <button className="profile-button" onClick={onLogout}>
+        <div className="profile-button">
           <span className="avatar"><UserRound size={19} /></span>
           <span>
             <strong>{currentUser.name}</strong>
             <small>{currentUser.role}</small>
           </span>
-        </button>
+        </div>
       </div>
     </header>
   );
