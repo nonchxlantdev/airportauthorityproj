@@ -26,14 +26,11 @@ import {
   X
 } from 'lucide-react';
 import { areas, departments, initialAnnouncements, permissions, priorities, roles, statuses } from './mockData.js';
+import { supabase } from './supabaseClient.js';
 import './styles.css';
 
 const adminUser = {
-  id: 'demo-admin',
-  name: 'Creator',
-  email: 'admin@belizeairport.bz',
-  password: 'demo1234',
-  initials: 'CR',
+  email: 'glenrickmspain@hotmail.com',
   role: 'System Administrator'
 };
 
@@ -75,25 +72,6 @@ const userFormDefaults = {
   status: 'Active',
   password: ''
 };
-
-function useLocalStorageState(key, initialValue) {
-  const [value, setValue] = useState(() => {
-    try {
-      const stored = window.localStorage.getItem(key);
-      return stored ? JSON.parse(stored) : initialValue;
-    } catch {
-      return initialValue;
-    }
-  });
-
-  const updateValue = (nextValue) => {
-    const resolved = typeof nextValue === 'function' ? nextValue(value) : nextValue;
-    setValue(resolved);
-    window.localStorage.setItem(key, JSON.stringify(resolved));
-  };
-
-  return [value, updateValue];
-}
 
 function formatDateTime(value = new Date()) {
   return new Intl.DateTimeFormat('en-BZ', {
@@ -137,7 +115,7 @@ function getUserCapabilities(user) {
 function userToSession(user) {
   return {
     id: user.id,
-    name: `${user.firstName} ${user.lastName}`,
+    name: `${user.firstName} ${user.lastName}`.trim() || user.email,
     email: user.email,
     role: user.role,
     department: user.department,
@@ -146,27 +124,74 @@ function userToSession(user) {
   };
 }
 
-function LoginPage({ users, onLogin }) {
+function profileFromRow(row) {
+  return {
+    id: row.id,
+    firstName: row.first_name || '',
+    lastName: row.last_name || '',
+    email: row.email || '',
+    phone: row.phone || '',
+    role: row.role || 'Staff / Employee',
+    department: row.department || 'Operations',
+    jobTitle: row.job_title || '',
+    status: row.status || 'Active',
+    initials: row.initials || createInitials(row.first_name, row.last_name),
+    createdAt: formatDateTime(new Date(row.created_at))
+  };
+}
+
+function jobFromRow(row, history = []) {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    department: row.department,
+    area: row.area,
+    location: row.location,
+    assignedUserId: row.assigned_user_id || '',
+    assignedTo: row.assigned_to || 'Unassigned',
+    assignedUserInitials: row.assigned_user_initials || 'UA',
+    priority: row.priority,
+    status: row.status,
+    approvalStatus: row.approval_status,
+    startDate: row.start_date || '',
+    dueDate: row.due_date || '',
+    completionDate: row.completion_date || '',
+    attachments: Array.isArray(row.attachments) ? row.attachments : [],
+    createdBy: row.created_by_name || 'System',
+    lastUpdatedBy: row.last_updated_by_name || 'System',
+    lastUpdated: formatDateTime(new Date(row.updated_at)),
+    history
+  };
+}
+
+function historyFromRow(row) {
+  return {
+    title: row.title,
+    by: row.actor_name || 'System',
+    at: formatDateTime(new Date(row.created_at)),
+    note: row.note || ''
+  };
+}
+
+function LoginPage({ onLogin }) {
   const [email, setEmail] = useState(adminUser.email);
-  const [password, setPassword] = useState(adminUser.password);
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
-    const cleanEmail = email.trim().toLowerCase();
+    setError('');
+    setIsSubmitting(true);
 
-    if (cleanEmail === adminUser.email && password === adminUser.password) {
-      onLogin(adminUser);
-      return;
+    try {
+      await onLogin(email.trim(), password);
+    } catch (error) {
+      setError(error.message || 'Email or password did not match an active user.');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    const matchingUser = users.find((user) => user.email.trim().toLowerCase() === cleanEmail && user.password === password && user.status === 'Active');
-    if (matchingUser) {
-      onLogin(userToSession(matchingUser));
-      return;
-    }
-
-    setError('Email or password did not match an active user.');
   }
 
   return (
@@ -200,18 +225,18 @@ function LoginPage({ users, onLogin }) {
             <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" />
           </label>
           {error && <p className="form-error">{error}</p>}
-          <button className="primary-button" type="submit">
+          <button className="primary-button" type="submit" disabled={isSubmitting}>
             <UserRound size={18} />
-            Login to Dashboard
+            {isSubmitting ? 'Signing in...' : 'Login to Dashboard'}
           </button>
-          <p className="login-note">Admin demo: admin@belizeairport.bz / demo1234. Created users can sign in with their saved password.</p>
+          <p className="login-note">Use the Supabase account created for this airport operations workspace.</p>
         </form>
       </section>
     </main>
   );
 }
 
-function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout }) {
+function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, onRefreshData }) {
   const capabilities = getUserCapabilities(currentUser);
   const [activeView, setActiveView] = useState(capabilities.canViewAllJobs ? 'dashboard' : 'my-tasks');
   const [selectedJob, setSelectedJob] = useState(null);
@@ -225,25 +250,62 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout })
   const visibleJobs = capabilities.canViewAllJobs ? jobs : jobs.filter((job) => job.assignedUserId === currentUser.id);
   const dashboardData = useMemo(() => buildDashboardData(visibleJobs), [visibleJobs]);
 
-  function handleCreateJob(formData) {
+  async function handleCreateJob(formData) {
     const assignedUser = users.find((user) => user.id === formData.assignedUserId);
+    const jobId = `BAC-${new Date().getFullYear()}-${String(jobs.length + 1).padStart(3, '0')}`;
+    const attachments = formData.attachments ? formData.attachments.split(',').map((item) => item.trim()).filter(Boolean) : [];
+    const completionDate = formData.status === 'Completed' ? new Date().toISOString().slice(0, 10) : '';
+    const historyItem = {
+      title: 'Job created',
+      by: currentUser.name,
+      at: formatDateTime(),
+      note: formData.comments || 'Initial job record created.'
+    };
+
+    const { error } = await supabase.from('jobs').insert({
+      id: jobId,
+      title: formData.title,
+      description: formData.description,
+      department: formData.department,
+      area: areas[0],
+      location: formData.location,
+      assigned_user_id: formData.assignedUserId || null,
+      assigned_to: assignedUser ? `${assignedUser.firstName} ${assignedUser.lastName}` : 'Unassigned',
+      assigned_user_initials: assignedUser ? assignedUser.initials : 'UA',
+      priority: formData.priority,
+      status: formData.status,
+      approval_status: formData.approvalStatus,
+      start_date: formData.startDate || null,
+      due_date: formData.dueDate || null,
+      completion_date: completionDate || null,
+      attachments,
+      created_by: currentUser.id,
+      last_updated_by: currentUser.id
+    });
+
+    if (error) {
+      window.alert(error.message);
+      return;
+    }
+
+    await supabase.from('job_history').insert({
+      job_id: jobId,
+      title: historyItem.title,
+      note: historyItem.note,
+      actor_id: currentUser.id,
+      actor_name: currentUser.name
+    });
+
     const nextJob = {
       ...formData,
-      id: `BAC-${new Date().getFullYear()}-${String(jobs.length + 1).padStart(3, '0')}`,
+      id: jobId,
       area: areas[0],
       createdBy: currentUser.name,
       assignedTo: assignedUser ? `${assignedUser.firstName} ${assignedUser.lastName}` : 'Unassigned',
       assignedUserInitials: assignedUser ? assignedUser.initials : 'UA',
-      completionDate: formData.status === 'Completed' ? new Date().toISOString().slice(0, 10) : '',
-      attachments: formData.attachments ? formData.attachments.split(',').map((item) => item.trim()).filter(Boolean) : [],
-      history: [
-        {
-          title: 'Job created',
-          by: currentUser.name,
-          at: formatDateTime(),
-          note: formData.comments || 'Initial job record created.'
-        }
-      ],
+      completionDate,
+      attachments,
+      history: [historyItem],
       lastUpdatedBy: currentUser.name,
       lastUpdated: formatDateTime()
     };
@@ -253,21 +315,66 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout })
     setActiveView('jobs');
   }
 
-  function handleCreateUser(formData) {
-    const nextUser = {
-      ...formData,
-      id: `USR-${String(users.length + 1).padStart(3, '0')}`,
-      initials: createInitials(formData.firstName, formData.lastName),
-      createdAt: formatDateTime()
-    };
+  async function handleCreateUser(formData) {
+    const { data, error } = await supabase.auth.signUp({
+      email: formData.email,
+      password: formData.password,
+      options: {
+        data: {
+          first_name: formData.firstName,
+          last_name: formData.lastName
+        }
+      }
+    });
 
-    setUsers((currentUsers) => [nextUser, ...currentUsers]);
+    if (error) {
+      window.alert(error.message);
+      return;
+    }
+
+    if (data.user?.id) {
+      await supabase
+        .from('profiles')
+        .update({
+          first_name: formData.firstName,
+          last_name: formData.lastName,
+          email: formData.email,
+          phone: formData.phone,
+          role: formData.role,
+          department: formData.department,
+          job_title: formData.jobTitle,
+          status: formData.status,
+          initials: createInitials(formData.firstName, formData.lastName)
+        })
+        .eq('id', data.user.id);
+    }
+
+    await onRefreshData();
     setActiveView('users');
   }
 
-  function handleUpdateUser(userId, formData) {
+  async function handleUpdateUser(userId, formData) {
     const updatedInitials = createInitials(formData.firstName, formData.lastName);
     const updatedName = `${formData.firstName} ${formData.lastName}`;
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        first_name: formData.firstName,
+        last_name: formData.lastName,
+        email: formData.email,
+        phone: formData.phone,
+        role: formData.role,
+        department: formData.department,
+        job_title: formData.jobTitle,
+        status: formData.status,
+        initials: updatedInitials
+      })
+      .eq('id', userId);
+
+    if (error) {
+      window.alert(error.message);
+      return;
+    }
 
     setUsers((currentUsers) => currentUsers.map((user) => {
       if (user.id !== userId) return user;
@@ -294,9 +401,36 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout })
     }));
   }
 
-  function handleUpdateJobStatus(jobId, nextStatus, note) {
+  async function handleUpdateJobStatus(jobId, nextStatus, note) {
     const updatedAt = formatDateTime();
     const completionDate = nextStatus === 'Completed' ? new Date().toISOString().slice(0, 10) : '';
+    const updatePayload = {
+      status: nextStatus,
+      completion_date: completionDate || null,
+      last_updated_by: currentUser.id
+    };
+
+    if (nextStatus === 'Completed') {
+      updatePayload.approval_status = 'Pending Approval';
+    }
+
+    const { error } = await supabase
+      .from('jobs')
+      .update(updatePayload)
+      .eq('id', jobId);
+
+    if (error) {
+      window.alert(error.message);
+      return;
+    }
+
+    await supabase.from('job_history').insert({
+      job_id: jobId,
+      title: `Status updated to ${nextStatus}`,
+      note: note || 'Status changed from task detail view.',
+      actor_id: currentUser.id,
+      actor_name: currentUser.name
+    });
 
     setJobs((currentJobs) => currentJobs.map((job) => {
       if (job.id !== jobId) return job;
@@ -1273,10 +1407,132 @@ function buildStats(records, labels, field, colors) {
   });
 }
 
+async function loadProfiles() {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return data.map(profileFromRow);
+}
+
+async function loadJobs() {
+  const [{ data: jobRows, error: jobsError }, { data: historyRows, error: historyError }] = await Promise.all([
+    supabase.from('jobs').select('*').order('created_at', { ascending: false }),
+    supabase.from('job_history').select('*').order('created_at', { ascending: false })
+  ]);
+
+  if (jobsError) throw jobsError;
+  if (historyError) throw historyError;
+
+  const historyByJob = historyRows.reduce((grouped, row) => {
+    grouped[row.job_id] = grouped[row.job_id] || [];
+    grouped[row.job_id].push(historyFromRow(row));
+    return grouped;
+  }, {});
+
+  return jobRows.map((row) => jobFromRow(row, historyByJob[row.id] || []));
+}
+
+async function loadCurrentUser(session) {
+  if (!session?.user?.id) return null;
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', session.user.id)
+    .single();
+
+  if (error) throw error;
+  return userToSession(profileFromRow(data));
+}
+
 function App() {
-  const [jobs, setJobs] = useLocalStorageState('air-authority-jobs', []);
-  const [users, setUsers] = useLocalStorageState('air-authority-users', []);
+  const [jobs, setJobs] = useState([]);
+  const [users, setUsers] = useState([]);
   const [sessionUser, setSessionUser] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [appError, setAppError] = useState('');
+
+  async function refreshData() {
+    const [nextUsers, nextJobs] = await Promise.all([loadProfiles(), loadJobs()]);
+    setUsers(nextUsers);
+    setJobs(nextJobs);
+  }
+
+  async function handleLogin(email, password) {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+
+    const profile = await loadCurrentUser(data.session);
+    if (!profile || profile.status !== 'Active') {
+      await supabase.auth.signOut();
+      throw new Error('This user is not active.');
+    }
+
+    setSessionUser(profile);
+    await refreshData();
+  }
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    setSessionUser(null);
+    setJobs([]);
+    setUsers([]);
+  }
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function restoreSession() {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const profile = await loadCurrentUser(data.session);
+
+        if (isMounted && profile?.status === 'Active') {
+          setSessionUser(profile);
+          await refreshData();
+        }
+      } catch (error) {
+        if (isMounted) setAppError(error.message);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    }
+
+    restoreSession();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  if (isLoading) {
+    return (
+      <main className="login-page">
+        <section className="login-panel">
+          <div className="login-card">
+            <h2>Loading workspace</h2>
+            <span>Connecting to Supabase...</span>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  if (appError) {
+    return (
+      <main className="login-page">
+        <section className="login-panel">
+          <div className="login-card">
+            <h2>Connection issue</h2>
+            <p className="form-error">{appError}</p>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   return sessionUser
     ? (
@@ -1286,10 +1542,11 @@ function App() {
         setJobs={setJobs}
         users={users}
         setUsers={setUsers}
-        onLogout={() => setSessionUser(null)}
+        onLogout={handleLogout}
+        onRefreshData={refreshData}
       />
     )
-    : <LoginPage users={users} onLogin={setSessionUser} />;
+    : <LoginPage onLogin={handleLogin} />;
 }
 
 createRoot(document.getElementById('root')).render(<App />);

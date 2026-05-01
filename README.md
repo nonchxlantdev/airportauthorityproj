@@ -43,6 +43,17 @@ https://nonchxlantdev.github.io/airportauthorityproj/
 
 In the GitHub repository, open `Settings > Pages` and set `Build and deployment > Source` to `GitHub Actions`. Every push to the `main` branch will run `.github/workflows/deploy.yml`, build the Vite app, and publish the `dist` folder.
 
+## Supabase Backend
+
+The app now connects to Supabase for shared login, users, jobs, and job history. For local environment overrides, copy `.env.example` to `.env.local` and set:
+
+```text
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
+```
+
+The public anon key is safe for browser use when Row Level Security policies are enabled. Never put the Supabase `service_role` key in this frontend app.
+
 ## MVP Build Steps
 
 1. Keep this demo frontend as the visual prototype.
