@@ -10,6 +10,7 @@ import {
   ClipboardList,
   Download,
   Eye,
+  EyeOff,
   FileBarChart,
   Grid2X2,
   MapPin,
@@ -261,12 +262,15 @@ async function uploadJobAttachments(jobId, files = []) {
 function LoginPage({ onLogin }) {
   const [email, setEmail] = useState(adminUser.email);
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSubmit(event) {
     event.preventDefault();
     setError('');
+    setMessage('');
     setIsSubmitting(true);
 
     try {
@@ -276,6 +280,27 @@ function LoginPage({ onLogin }) {
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  async function handleForgotPassword() {
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setError('Enter your email address first.');
+      return;
+    }
+
+    setError('');
+    setMessage('');
+    const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+      redirectTo: 'https://nonchxlantdev.github.io/airportauthorityproj/'
+    });
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+
+    setMessage('Password reset email sent.');
   }
 
   return (
@@ -306,12 +331,21 @@ function LoginPage({ onLogin }) {
           </label>
           <label>
             Password
-            <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" />
+            <span className="password-field">
+              <input value={password} onChange={(event) => setPassword(event.target.value)} type={showPassword ? 'text' : 'password'} autoComplete="current-password" />
+              <button type="button" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? 'Hide password' : 'Show password'}>
+                {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+              </button>
+            </span>
           </label>
           {error && <p className="form-error">{error}</p>}
+          {message && <p className="form-success">{message}</p>}
           <button className="primary-button" type="submit" disabled={isSubmitting}>
             <UserRound size={18} />
             {isSubmitting ? 'Signing in...' : 'Login to Dashboard'}
+          </button>
+          <button className="forgot-password-button" type="button" onClick={handleForgotPassword}>
+            Forgot password?
           </button>
           <p className="login-note">Use the Supabase account created for this airport operations workspace.</p>
         </form>
@@ -1297,6 +1331,7 @@ function UsersView({ users, jobs, teams, onCreateUser, onCreateTeam, onUpdateUse
   const [mode, setMode] = useState('list');
   const [userSearch, setUserSearch] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showUserPassword, setShowUserPassword] = useState(false);
   const isEditing = Boolean(editingUserId);
   const filteredUsers = users.filter((user) => {
     const target = `${user.firstName} ${user.lastName} ${user.email} ${user.department} ${user.role}`.toLowerCase();
@@ -1340,6 +1375,7 @@ function UsersView({ users, jobs, teams, onCreateUser, onCreateTeam, onUpdateUse
     setEditingUserId(null);
     setFormData(userFormDefaults);
     setTeamFormData(teamFormDefaults);
+    setShowUserPassword(false);
     setMode('list');
   }
 
@@ -1439,14 +1475,19 @@ function UsersView({ users, jobs, teams, onCreateUser, onCreateTeam, onUpdateUse
             </label>
             <label className="wide-field">
               {isEditing ? 'Reset password' : 'Login password'}
-              <input
-                required={!isEditing}
-                minLength={formData.password ? 6 : undefined}
-                type="password"
-                value={formData.password}
-                onChange={(event) => updateField('password', event.target.value)}
-                placeholder={isEditing ? 'Leave blank to keep current password' : 'Minimum 6 characters'}
-              />
+              <span className="password-field">
+                <input
+                  required={!isEditing}
+                  minLength={formData.password ? 6 : undefined}
+                  type={showUserPassword ? 'text' : 'password'}
+                  value={formData.password}
+                  onChange={(event) => updateField('password', event.target.value)}
+                  placeholder={isEditing ? 'Leave blank to keep current password' : 'Minimum 6 characters'}
+                />
+                <button type="button" onClick={() => setShowUserPassword((current) => !current)} aria-label={showUserPassword ? 'Hide password' : 'Show password'}>
+                  {showUserPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                </button>
+              </span>
             </label>
             <label>
               Phone
