@@ -207,6 +207,27 @@ button {
   background:
     linear-gradient(180deg, rgba(0, 38, 89, 0.93), rgba(0, 30, 73, 0.98)),
     url("https://images.unsplash.com/photo-1436491865332-7a61a109cc05?auto=format&fit=crop&w=900&q=80") center bottom / cover;
+  transition: flex-basis 0.2s ease, width 0.2s ease;
+}
+
+.sidebar-collapsed .sidebar {
+  flex-basis: 84px;
+}
+
+.sidebar-collapsed .sidebar-brand {
+  justify-content: center;
+  padding-inline: 12px;
+}
+
+.sidebar-collapsed .sidebar-brand-text,
+.sidebar-collapsed .nav-item span,
+.sidebar-collapsed .sidebar-footer span {
+  display: none;
+}
+
+.sidebar-collapsed .nav-item {
+  justify-content: center;
+  padding: 0;
 }
 
 .sidebar-brand {
@@ -629,6 +650,14 @@ tr:last-child td {
   white-space: nowrap;
 }
 
+.team-line {
+  display: block;
+  margin-top: 6px;
+  color: #657483;
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .person span {
   display: grid;
   place-items: center;
@@ -804,6 +833,37 @@ tr:last-child td {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 18px;
+}
+
+.team-member-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dce5ee;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.team-member-picker label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+
+.team-member-picker input {
+  width: auto;
+  min-height: 0;
+}
+
+.team-member-picker small {
+  display: block;
+  color: #657483;
+}
+
+.teams-list {
+  margin-bottom: 18px;
 }
 
 .permission-strip span,
@@ -1680,6 +1740,18 @@ th {
   .split-layout {
     grid-template-columns: 1fr;
   }
+
+  .page-heading,
+  .jobs-header,
+  .users-panel-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .toolbar-actions,
+  .filters {
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 880px) {
@@ -1697,12 +1769,29 @@ th {
 
   .sidebar {
     position: static;
+    width: 100%;
+    flex-basis: auto;
     height: auto;
     min-height: 0;
   }
 
+  .sidebar-collapsed .sidebar {
+    display: none;
+  }
+
+  .sidebar-collapsed .sidebar-brand-text,
+  .sidebar-collapsed .nav-item span,
+  .sidebar-collapsed .sidebar-footer span {
+    display: block;
+  }
+
   .sidebar nav {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nav-item {
+    justify-content: flex-start;
+    padding: 0 14px;
   }
 
   .sidebar-footer {
@@ -1728,7 +1817,9 @@ th {
   }
 
   .form-grid,
-  .detail-grid {
+  .detail-grid,
+  .drawer-edit-form,
+  .team-member-picker {
     grid-template-columns: 1fr;
   }
 
@@ -1760,15 +1851,36 @@ th {
     grid-template-columns: 1fr;
   }
 
+  .topbar-title,
+  .user-tools,
   .toolbar-actions,
   .filters {
     width: 100%;
+  }
+
+  .topbar-title {
+    justify-content: space-between;
   }
 
   .toolbar-actions > *,
   .filters > *,
   .search-box {
     width: 100%;
+  }
+
+  .profile-button {
+    min-width: 0;
+  }
+
+  .profile-button span:last-child {
+    min-width: 0;
+  }
+
+  .profile-button strong,
+  .profile-button small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .chart-content {

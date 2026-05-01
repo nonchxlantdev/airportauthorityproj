@@ -52,6 +52,7 @@ const jobFormDefaults = {
   department: 'Operations',
   location: 'Terminal 1',
   assignedUserId: '',
+  teamId: '',
   priority: 'Medium',
   status: 'Pending',
   dueDate: '',
@@ -70,6 +71,12 @@ const userFormDefaults = {
   jobTitle: '',
   status: 'Active',
   password: ''
+};
+
+const teamFormDefaults = {
+  name: '',
+  department: 'Operations',
+  memberIds: []
 };
 
 function formatDateTime(value = new Date()) {
@@ -152,6 +159,7 @@ function jobFromRow(row, history = []) {
     area: row.area,
     location: row.location,
     assignedUserId: row.assigned_user_id || '',
+    teamId: row.team_id || '',
     assignedTo: row.assigned_to || 'Unassigned',
     assignedUserInitials: row.assigned_user_initials || 'UA',
     priority: row.priority,
@@ -167,6 +175,16 @@ function jobFromRow(row, history = []) {
     lastUpdatedBy: row.last_updated_by_name || 'System',
     lastUpdated: formatDateTime(new Date(row.updated_at)),
     history
+  };
+}
+
+function teamFromRow(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    department: row.department || 'Operations',
+    memberIds: row.team_members?.map((member) => member.user_id) || [],
+    createdAt: row.created_at
   };
 }
 
@@ -197,6 +215,18 @@ function enrichJobsWithUsers(jobs, users) {
     ...job,
     createdBy: usersById[job.createdById] ? displayUserName(usersById[job.createdById]) : job.createdBy,
     lastUpdatedBy: usersById[job.lastUpdatedById] ? displayUserName(usersById[job.lastUpdatedById]) : job.lastUpdatedBy
+  }));
+}
+
+function enrichJobsWithTeams(jobs, teams) {
+  const teamsById = teams.reduce((grouped, team) => {
+    grouped[team.id] = team;
+    return grouped;
+  }, {});
+
+  return jobs.map((job) => ({
+    ...job,
+    teamName: teamsById[job.teamId]?.name || ''
   }));
 }
 
@@ -290,19 +320,23 @@ function LoginPage({ onLogin }) {
   );
 }
 
-function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, onRefreshData }) {
+function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, teams, setTeams, onLogout, onRefreshData }) {
   const capabilities = getUserCapabilities(currentUser);
   const [activeView, setActiveView] = useState(capabilities.canViewAllJobs ? 'dashboard' : 'my-tasks');
   const [selectedJob, setSelectedJob] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [dashboardFilter, setDashboardFilter] = useState('all');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [dateFilter, setDateFilter] = useState({
     mode: 'single',
     startDate: new Date().toISOString().slice(0, 10),
     endDate: new Date().toISOString().slice(0, 10)
   });
 
-  const visibleJobs = capabilities.canViewAllJobs ? jobs : jobs.filter((job) => job.assignedUserId === currentUser.id);
+  const currentUserTeamIds = teams.filter((team) => team.memberIds.includes(currentUser.id)).map((team) => team.id);
+  const visibleJobs = capabilities.canViewAllJobs
+    ? jobs
+    : jobs.filter((job) => job.assignedUserId === currentUser.id || currentUserTeamIds.includes(job.teamId));
   const dashboardData = useMemo(() => buildDashboardData(visibleJobs), [visibleJobs]);
   const dashboardJobs = useMemo(() => filterJobsByMetric(visibleJobs, dashboardFilter), [visibleJobs, dashboardFilter]);
 
@@ -334,6 +368,7 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
       area: areas[0],
       location: formData.location,
       assigned_user_id: formData.assignedUserId || null,
+      team_id: formData.teamId || null,
       assigned_to: assignedUser ? `${assignedUser.firstName} ${assignedUser.lastName}` : 'Unassigned',
       assigned_user_initials: assignedUser ? assignedUser.initials : 'UA',
       priority: formData.priority,
@@ -366,6 +401,8 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
       area: areas[0],
       createdById: currentUser.id,
       lastUpdatedById: currentUser.id,
+      teamId: formData.teamId || '',
+      teamName: teams.find((team) => team.id === formData.teamId)?.name || '',
       createdBy: currentUser.name,
       assignedTo: assignedUser ? `${assignedUser.firstName} ${assignedUser.lastName}` : 'Unassigned',
       assignedUserInitials: assignedUser ? assignedUser.initials : 'UA',
@@ -401,6 +438,7 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
       department: formData.department,
       location: formData.location,
       assigned_user_id: formData.assignedUserId || null,
+      team_id: formData.teamId || null,
       assigned_to: assignedUser ? `${assignedUser.firstName} ${assignedUser.lastName}` : 'Unassigned',
       assigned_user_initials: assignedUser ? assignedUser.initials : 'UA',
       priority: formData.priority,
@@ -436,6 +474,7 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
         ...formData,
         assignedTo: assignedUser ? `${assignedUser.firstName} ${assignedUser.lastName}` : 'Unassigned',
         assignedUserInitials: assignedUser ? assignedUser.initials : 'UA',
+        teamName: teams.find((team) => team.id === formData.teamId)?.name || '',
         completionDate,
         attachments,
         lastUpdated: formatDateTime(),
@@ -497,6 +536,46 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
 
     await onRefreshData();
     setActiveView('users');
+  }
+
+  async function handleCreateTeam(formData) {
+    const { data, error } = await supabase
+      .from('teams')
+      .insert({
+        name: formData.name,
+        department: formData.department,
+        created_by: currentUser.id
+      })
+      .select()
+      .single();
+
+    if (error) {
+      window.alert(error.message);
+      return false;
+    }
+
+    if (formData.memberIds.length) {
+      const { error: memberError } = await supabase.from('team_members').insert(
+        formData.memberIds.map((userId) => ({ team_id: data.id, user_id: userId }))
+      );
+
+      if (memberError) {
+        window.alert(memberError.message);
+        return false;
+      }
+    }
+
+    setTeams((currentTeams) => [
+      {
+        id: data.id,
+        name: data.name,
+        department: data.department,
+        memberIds: formData.memberIds,
+        createdAt: data.created_at
+      },
+      ...currentTeams
+    ]);
+    return true;
   }
 
   async function handleUpdateUser(userId, formData) {
@@ -608,10 +687,10 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
   }
 
   return (
-    <div className="app-shell">
-      <Sidebar activeView={activeView} capabilities={capabilities} onNavigate={setActiveView} onLogout={onLogout} />
+    <div className={isSidebarCollapsed ? 'app-shell sidebar-collapsed' : 'app-shell'}>
+      <Sidebar activeView={activeView} capabilities={capabilities} onNavigate={setActiveView} onLogout={onLogout} isCollapsed={isSidebarCollapsed} />
       <main className="main-content">
-        <TopBar activeView={activeView} currentUser={currentUser} />
+        <TopBar activeView={activeView} currentUser={currentUser} onToggleSidebar={() => setIsSidebarCollapsed((current) => !current)} />
         <section className="content-pad">
           {activeView === 'dashboard' && (
             <DashboardView
@@ -631,7 +710,7 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
           {activeView === 'my-tasks' && (
             <MyTasksView
               currentUser={currentUser}
-              jobs={jobs.filter((job) => job.assignedUserId === currentUser.id)}
+              jobs={jobs.filter((job) => job.assignedUserId === currentUser.id || currentUserTeamIds.includes(job.teamId))}
               onViewJob={(job) => setSelectedJob(job)}
               searchTerm={searchTerm}
               setSearchTerm={setSearchTerm}
@@ -650,13 +729,15 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
             />
           )}
           {activeView === 'create-job' && capabilities.canCreateJobs && (
-            <CreateJobView users={users} onCreateJob={handleCreateJob} />
+            <CreateJobView users={users} teams={teams} onCreateJob={handleCreateJob} />
           )}
           {activeView === 'users' && capabilities.canManageUsers && (
             <UsersView
               users={users}
               jobs={jobs}
+              teams={teams}
               onCreateUser={handleCreateUser}
+              onCreateTeam={handleCreateTeam}
               onUpdateUser={handleUpdateUser}
               onViewJob={(job) => setSelectedJob(job)}
             />
@@ -673,6 +754,7 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
           canUpdateStatus={capabilities.canViewAllJobs || selectedJob.assignedUserId === currentUser.id}
           canEditJob={currentUser.role === 'System Administrator' || selectedJob.createdById === currentUser.id}
           users={users}
+          teams={teams}
           onUpdateJob={handleUpdateJob}
           onUpdateStatus={handleUpdateJobStatus}
           onClose={() => setSelectedJob(null)}
@@ -682,7 +764,7 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, onLogout, o
   );
 }
 
-function Sidebar({ activeView, capabilities, onNavigate, onLogout }) {
+function Sidebar({ activeView, capabilities, onNavigate, onLogout, isCollapsed }) {
   const visibleNavItems = navItems.filter((item) => {
     if (item.key === 'create-job') return capabilities.canCreateJobs;
     if (item.key === 'users') return capabilities.canManageUsers;
@@ -694,7 +776,7 @@ function Sidebar({ activeView, capabilities, onNavigate, onLogout }) {
     <aside className="sidebar">
       <div className="sidebar-brand">
         <div className="brand-icon"><Plane size={38} /></div>
-        <div>
+        <div className="sidebar-brand-text">
           <strong>Belize Airport</strong>
           <span>Concession Company Limited</span>
         </div>
@@ -707,15 +789,16 @@ function Sidebar({ activeView, capabilities, onNavigate, onLogout }) {
               className={activeView === item.key ? 'nav-item active' : 'nav-item'}
               key={item.key}
               onClick={() => onNavigate(item.key)}
+              title={isCollapsed ? item.label : undefined}
             >
               <Icon size={20} />
-              {item.label}
+              <span>{item.label}</span>
             </button>
           );
         })}
         <button className="nav-item logout-nav-item" type="button" onClick={onLogout}>
           <X size={20} />
-          Log Out
+          <span>Log Out</span>
         </button>
       </nav>
       <div className="sidebar-footer">
@@ -726,12 +809,12 @@ function Sidebar({ activeView, capabilities, onNavigate, onLogout }) {
   );
 }
 
-function TopBar({ activeView, currentUser }) {
+function TopBar({ activeView, currentUser, onToggleSidebar }) {
   const title = navItems.find((item) => item.key === activeView)?.label || 'Dashboard';
   return (
     <header className="topbar">
       <div className="topbar-title">
-        <button className="icon-button" aria-label="Open menu"><Menu size={22} /></button>
+        <button className="icon-button" type="button" onClick={onToggleSidebar} aria-label="Toggle task bar"><Menu size={22} /></button>
         <strong>{title}</strong>
       </div>
       <div className="user-tools">
@@ -1051,7 +1134,10 @@ function RecentJobs({ jobs, onCreateJob, onViewJob, searchTerm, setSearchTerm, c
                 <td><span className="job-id">{job.id}</span></td>
                 <td><strong>{job.title}</strong></td>
                 <td>{job.department}</td>
-                <td><span className="person"><span>{job.assignedUserInitials}</span>{job.assignedTo}</span></td>
+                <td>
+                  <span className="person"><span>{job.assignedUserInitials}</span>{job.assignedTo}</span>
+                  {job.teamName && <small className="team-line">Team: {job.teamName}</small>}
+                </td>
                 <td>{job.area} / {job.location}</td>
                 <td><StatusPill label={job.status} /></td>
                 <td><PriorityPill label={job.priority} /></td>
@@ -1075,7 +1161,7 @@ function RecentJobs({ jobs, onCreateJob, onViewJob, searchTerm, setSearchTerm, c
   );
 }
 
-function CreateJobView({ users, onCreateJob }) {
+function CreateJobView({ users, teams, onCreateJob }) {
   const [formData, setFormData] = useState(jobFormDefaults);
   const [attachmentFiles, setAttachmentFiles] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1140,6 +1226,13 @@ function CreateJobView({ users, onCreateJob }) {
             </select>
           </label>
           <label>
+            Assign to team
+            <select value={formData.teamId} onChange={(event) => updateField('teamId', event.target.value)}>
+              <option value="">No team</option>
+              {teams.map((team) => <option key={team.id} value={team.id}>{team.name} - {team.department}</option>)}
+            </select>
+          </label>
+          <label>
             Priority
             <select value={formData.priority} onChange={(event) => updateField('priority', event.target.value)}>
               {priorities.map((priority) => <option key={priority}>{priority}</option>)}
@@ -1197,8 +1290,9 @@ function CreateJobView({ users, onCreateJob }) {
   );
 }
 
-function UsersView({ users, jobs, onCreateUser, onUpdateUser, onViewJob }) {
+function UsersView({ users, jobs, teams, onCreateUser, onCreateTeam, onUpdateUser, onViewJob }) {
   const [formData, setFormData] = useState(userFormDefaults);
+  const [teamFormData, setTeamFormData] = useState(teamFormDefaults);
   const [editingUserId, setEditingUserId] = useState(null);
   const [mode, setMode] = useState('list');
   const [userSearch, setUserSearch] = useState('');
@@ -1211,6 +1305,19 @@ function UsersView({ users, jobs, onCreateUser, onUpdateUser, onViewJob }) {
 
   function updateField(field, value) {
     setFormData((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateTeamField(field, value) {
+    setTeamFormData((current) => ({ ...current, [field]: value }));
+  }
+
+  function toggleTeamMember(userId) {
+    setTeamFormData((current) => ({
+      ...current,
+      memberIds: current.memberIds.includes(userId)
+        ? current.memberIds.filter((memberId) => memberId !== userId)
+        : [...current.memberIds, userId]
+    }));
   }
 
   function startEditUser(user) {
@@ -1232,6 +1339,7 @@ function UsersView({ users, jobs, onCreateUser, onUpdateUser, onViewJob }) {
   function resetForm() {
     setEditingUserId(null);
     setFormData(userFormDefaults);
+    setTeamFormData(teamFormDefaults);
     setMode('list');
   }
 
@@ -1249,21 +1357,68 @@ function UsersView({ users, jobs, onCreateUser, onUpdateUser, onViewJob }) {
     resetForm();
   }
 
+  async function handleTeamSubmit(event) {
+    event.preventDefault();
+    setIsSubmitting(true);
+    const wasCreated = await onCreateTeam(teamFormData);
+    setIsSubmitting(false);
+    if (wasCreated) resetForm();
+  }
+
   return (
     <>
       <PageHeading
-        title={mode === 'list' ? 'Users' : isEditing ? 'Edit User' : 'Create User'}
-        description={mode === 'list' ? 'Search and manage active airport users' : 'Create users, edit permissions, and reset login access'}
+        title={mode === 'list' ? 'Users' : mode === 'team' ? 'Create Team' : isEditing ? 'Edit User' : 'Create User'}
+        description={mode === 'list' ? 'Search users and manage assignment teams' : mode === 'team' ? 'Group multiple users so they can share access to assigned jobs' : 'Create users, edit permissions, and reset login access'}
         action={mode === 'list' ? (
-          <button className="export-button" type="button" onClick={() => { setMode('form'); setEditingUserId(null); setFormData(userFormDefaults); }}>
-            <CirclePlus size={18} />
-            Create User
-          </button>
+          <div className="toolbar-actions">
+            <button className="export-button" type="button" onClick={() => { setMode('team'); setTeamFormData(teamFormDefaults); }}>
+              <Users size={18} />
+              Create Team
+            </button>
+            <button className="export-button" type="button" onClick={() => { setMode('form'); setEditingUserId(null); setFormData(userFormDefaults); }}>
+              <CirclePlus size={18} />
+              Create User
+            </button>
+          </div>
         ) : (
           <button className="secondary-button" type="button" onClick={resetForm}>Back to Users</button>
         )}
       />
-      {mode === 'form' ? (
+      {mode === 'team' ? (
+        <form className="panel form-panel" onSubmit={handleTeamSubmit}>
+          <div className="form-grid compact-form">
+            <label>
+              Team name
+              <input required value={teamFormData.name} onChange={(event) => updateTeamField('name', event.target.value)} placeholder="Example: Maintenance Night Shift" />
+            </label>
+            <label>
+              Department
+              <select value={teamFormData.department} onChange={(event) => updateTeamField('department', event.target.value)}>
+                {departments.map((department) => <option key={department}>{department}</option>)}
+              </select>
+            </label>
+            <div className="wide-field team-member-picker">
+              {users.map((user) => (
+                <label key={user.id}>
+                  <input
+                    type="checkbox"
+                    checked={teamFormData.memberIds.includes(user.id)}
+                    onChange={() => toggleTeamMember(user.id)}
+                  />
+                  <span>{displayUserName(user)} <small>{user.department}</small></span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="form-actions">
+            <button className="primary-button fit-button" type="submit" disabled={isSubmitting}>
+              <Users size={18} />
+              {isSubmitting ? 'Creating Team...' : 'Create Team'}
+            </button>
+          </div>
+        </form>
+      ) : mode === 'form' ? (
         <form className="panel form-panel" onSubmit={handleSubmit}>
           <div className="panel-header form-title">
             <h2>{isEditing ? 'Edit User' : 'Create User'}</h2>
@@ -1332,6 +1487,35 @@ function UsersView({ users, jobs, onCreateUser, onUpdateUser, onViewJob }) {
           </div>
         </form>
       ) : (
+        <>
+        <section className="panel users-list teams-list">
+          <div className="panel-header users-panel-header">
+            <h2>Teams</h2>
+            <span className="record-count">{teams.length} total</span>
+          </div>
+          {teams.length ? teams.map((team) => (
+            <article className="user-card" key={team.id}>
+              <span className="avatar user-avatar"><Users size={18} /></span>
+              <div className="user-card-main">
+                <div className="user-card-heading">
+                  <div>
+                    <strong>{team.name}</strong>
+                    <p>{team.department}</p>
+                    <small>{team.memberIds.length} member{team.memberIds.length === 1 ? '' : 's'}</small>
+                  </div>
+                </div>
+                <div className="permission-strip">
+                  {team.memberIds.map((memberId) => {
+                    const member = users.find((user) => user.id === memberId);
+                    return member ? <span key={memberId}>{displayUserName(member)}</span> : null;
+                  })}
+                </div>
+              </div>
+            </article>
+          )) : (
+            <EmptyState title="No teams yet" description="Create a team to assign jobs to multiple users." compact />
+          )}
+        </section>
         <section className="panel users-list">
           <div className="panel-header users-panel-header">
             <h2>Created Users</h2>
@@ -1355,6 +1539,7 @@ function UsersView({ users, jobs, onCreateUser, onUpdateUser, onViewJob }) {
             <EmptyState title="No matching users" description="Adjust the search or create a new user." compact />
           )}
         </section>
+        </>
       )}
     </>
   );
@@ -1408,6 +1593,7 @@ function jobToFormData(job) {
     department: job.department || 'Operations',
     location: job.location || 'Terminal 1',
     assignedUserId: job.assignedUserId || '',
+    teamId: job.teamId || '',
     priority: job.priority || 'Medium',
     status: job.status || 'Pending',
     dueDate: job.dueDate || '',
@@ -1418,7 +1604,7 @@ function jobToFormData(job) {
   };
 }
 
-function JobDetailsDrawer({ job, currentUser, canUpdateStatus, canEditJob, users, onUpdateJob, onUpdateStatus, onClose }) {
+function JobDetailsDrawer({ job, currentUser, canUpdateStatus, canEditJob, users, teams, onUpdateJob, onUpdateStatus, onClose }) {
   const [statusValue, setStatusValue] = useState(job.status);
   const [statusNote, setStatusNote] = useState('');
   const [isEditing, setIsEditing] = useState(false);
@@ -1506,6 +1692,13 @@ function JobDetailsDrawer({ job, currentUser, canUpdateStatus, canEditJob, users
                 </select>
               </label>
               <label>
+                Assign to team
+                <select value={editData.teamId} onChange={(event) => updateEditField('teamId', event.target.value)}>
+                  <option value="">No team</option>
+                  {teams.map((team) => <option key={team.id} value={team.id}>{team.name} - {team.department}</option>)}
+                </select>
+              </label>
+              <label>
                 Priority
                 <select value={editData.priority} onChange={(event) => updateEditField('priority', event.target.value)}>
                   {priorities.map((priority) => <option key={priority}>{priority}</option>)}
@@ -1554,6 +1747,7 @@ function JobDetailsDrawer({ job, currentUser, canUpdateStatus, canEditJob, users
           <Detail label="Area" value={job.area} />
           <Detail label="Location" value={job.location} />
           <Detail label="Assigned Staff" value={job.assignedTo} />
+          <Detail label="Assigned Team" value={job.teamName || 'No team'} />
           <Detail label="Created By" value={job.createdBy} />
           <Detail label="Priority" value={<PriorityPill label={job.priority} />} />
           <Detail label="Status" value={<StatusPill label={job.status} />} />
@@ -1801,6 +1995,16 @@ async function loadJobs() {
   return jobRows.map((row) => jobFromRow(row, historyByJob[row.id] || []));
 }
 
+async function loadTeams() {
+  const { data, error } = await supabase
+    .from('teams')
+    .select('*, team_members(user_id)')
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return data.map(teamFromRow);
+}
+
 async function loadCurrentUser(session) {
   if (!session?.user?.id) return null;
 
@@ -1817,14 +2021,16 @@ async function loadCurrentUser(session) {
 function App() {
   const [jobs, setJobs] = useState([]);
   const [users, setUsers] = useState([]);
+  const [teams, setTeams] = useState([]);
   const [sessionUser, setSessionUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [appError, setAppError] = useState('');
 
   async function refreshData() {
-    const [nextUsers, nextJobs] = await Promise.all([loadProfiles(), loadJobs()]);
+    const [nextUsers, nextJobs, nextTeams] = await Promise.all([loadProfiles(), loadJobs(), loadTeams()]);
     setUsers(nextUsers);
-    setJobs(enrichJobsWithUsers(nextJobs, nextUsers));
+    setTeams(nextTeams);
+    setJobs(enrichJobsWithTeams(enrichJobsWithUsers(nextJobs, nextUsers), nextTeams));
   }
 
   async function handleLogin(email, password) {
@@ -1846,6 +2052,7 @@ function App() {
     setSessionUser(null);
     setJobs([]);
     setUsers([]);
+    setTeams([]);
   }
 
   useEffect(() => {
@@ -1908,6 +2115,8 @@ function App() {
         setJobs={setJobs}
         users={users}
         setUsers={setUsers}
+        teams={teams}
+        setTeams={setTeams}
         onLogout={handleLogout}
         onRefreshData={refreshData}
       />
