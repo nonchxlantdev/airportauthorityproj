@@ -1169,8 +1169,11 @@ function RecentJobs({ jobs, onCreateJob, onViewJob, searchTerm, setSearchTerm, c
                 <td><strong>{job.title}</strong></td>
                 <td>{job.department}</td>
                 <td>
-                  <span className="person"><span>{job.assignedUserInitials}</span>{job.assignedTo}</span>
-                  {job.teamName && <small className="team-line">Team: {job.teamName}</small>}
+                  {job.teamName ? (
+                    <span className="person team-assignment"><span><Users size={14} /></span>{job.teamName}</span>
+                  ) : (
+                    <span className="person"><span>{job.assignedUserInitials}</span>{job.assignedTo}</span>
+                  )}
                 </td>
                 <td>{job.area} / {job.location}</td>
                 <td><StatusPill label={job.status} /></td>
@@ -1652,6 +1655,10 @@ function JobDetailsDrawer({ job, currentUser, canUpdateStatus, canEditJob, users
   const [editData, setEditData] = useState(() => jobToFormData(job));
   const [editFiles, setEditFiles] = useState([]);
   const [isSaving, setIsSaving] = useState(false);
+  const assignedTeam = teams.find((team) => team.id === job.teamId);
+  const assignedTeamMembers = assignedTeam?.memberIds
+    .map((memberId) => users.find((user) => user.id === memberId))
+    .filter(Boolean) || [];
 
   useEffect(() => {
     setStatusValue(job.status);
@@ -1787,8 +1794,17 @@ function JobDetailsDrawer({ job, currentUser, canUpdateStatus, canEditJob, users
           <Detail label="Department" value={job.department} />
           <Detail label="Area" value={job.area} />
           <Detail label="Location" value={job.location} />
-          <Detail label="Assigned Staff" value={job.assignedTo} />
-          <Detail label="Assigned Team" value={job.teamName || 'No team'} />
+          <Detail label="Assigned To" value={job.teamName || job.assignedTo} />
+          <Detail
+            label={job.teamName ? 'Team Members' : 'Assigned Staff'}
+            value={job.teamName ? (
+              assignedTeamMembers.length ? (
+                <span className="detail-list">
+                  {assignedTeamMembers.map((member) => <span key={member.id}>{displayUserName(member)}</span>)}
+                </span>
+              ) : 'No team members'
+            ) : job.assignedTo}
+          />
           <Detail label="Created By" value={job.createdBy} />
           <Detail label="Priority" value={<PriorityPill label={job.priority} />} />
           <Detail label="Status" value={<StatusPill label={job.status} />} />

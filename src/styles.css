@@ -705,6 +705,11 @@ tr:last-child td {
   font-weight: 800;
 }
 
+.team-assignment span {
+  color: #063d2b;
+  background: #8af3ff;
+}
+
 .person span {
   display: grid;
   place-items: center;
@@ -1129,6 +1134,11 @@ tr:last-child td {
 .detail-item strong {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.detail-list {
+  display: grid;
+  gap: 4px;
 }
 
 .detail-section {
