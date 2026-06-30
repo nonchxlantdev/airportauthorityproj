@@ -90,7 +90,7 @@ export function AreasLocationsView({ users, staffPositions }) {
             </div>
             {!locatedStaff.length && staffRows.length > 0 && (
               <p className="staff-locations-note">
-                Staff share location automatically when signed in on a device with GPS enabled. Open the app on a phone or tablet outdoors to populate the map.
+                All signed-in users share location automatically. Location access is required to use the app and cannot be turned off in-app.
               </p>
             )}
           </aside>

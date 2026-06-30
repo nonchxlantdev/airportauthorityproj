@@ -17,6 +17,10 @@ const VIEW_ALL_JOBS_ROLES = [
   'Read-Only / Auditor'
 ];
 
+export function mustShareLocation(user) {
+  return Boolean(user?.id);
+}
+
 export function canApproveCompletedJobs(user) {
   return APPROVAL_ROLES.includes(user?.role || '');
 }

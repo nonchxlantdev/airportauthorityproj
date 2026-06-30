@@ -2141,6 +2141,47 @@ th {
   flex-shrink: 0;
 }
 
+.staff-location-gate {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.72);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 1.5rem;
+  position: fixed;
+  z-index: 1100;
+}
+
+.staff-location-gate__panel {
+  background: white;
+  border: 1px solid #dce5ee;
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+  max-width: 28rem;
+  padding: 1.5rem;
+  width: 100%;
+}
+
+.staff-location-gate__panel h2 {
+  margin: 0 0 0.75rem;
+}
+
+.staff-location-gate__panel p {
+  color: #334155;
+  line-height: 1.5;
+  margin: 0 0 0.85rem;
+}
+
+.staff-location-gate__note {
+  color: #64748b;
+  font-size: 0.88rem;
+  margin-bottom: 0 !important;
+}
+
+.staff-location-gate .btn {
+  margin-bottom: 0.85rem;
+}
+
 .toast-stack {
   display: flex;
   flex-direction: column;
