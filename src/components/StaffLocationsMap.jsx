@@ -1,36 +1,81 @@
 import { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { GOLDSON_AIRPORT_BOUNDS } from '../config/offlineMapDefaults.js';
-import { DEFAULT_MAP_TILE_URL_TEMPLATE } from '../config/offlineMapDefaults.js';
+import { AIRPORT_ZONE_BOUNDS } from '../config/airportLocations.js';
+import { GOLDSON_AIRPORT_BOUNDS, DEFAULT_MAP_TILE_URL_TEMPLATE } from '../config/offlineMapDefaults.js';
 
 const MAP_CENTER = [
   (GOLDSON_AIRPORT_BOUNDS.north + GOLDSON_AIRPORT_BOUNDS.south) / 2,
   (GOLDSON_AIRPORT_BOUNDS.east + GOLDSON_AIRPORT_BOUNDS.west) / 2
 ];
 
-function createStaffMarkerIcon(initials) {
+const ZONE_COLORS = {
+  'Terminal 1': '#2563eb',
+  'Terminal 2': '#0891b2',
+  'Cargo Area': '#7c3aed',
+  'Runway / Apron': '#ea580c',
+  'Parking Area': '#059669',
+  'VIP Lounge': '#db2777',
+  'Immigration Area': '#4f46e5',
+  'Customs Area': '#0d9488',
+  'Restrooms': '#64748b',
+  'Other Airport Location': '#475569'
+};
+
+function createStaffMarkerIcon(initials, isSelected) {
   return L.divIcon({
     className: 'staff-map-marker-wrap',
-    html: `<span class="staff-map-marker">${initials}</span>`,
-    iconSize: [36, 36],
-    iconAnchor: [18, 18],
-    popupAnchor: [0, -16]
+    html: `
+      <span class="staff-map-marker ${isSelected ? 'selected' : ''}">
+        <span class="staff-map-marker__ring"></span>
+        <span class="staff-map-marker__avatar">${initials}</span>
+      </span>
+    `,
+    iconSize: [44, 44],
+    iconAnchor: [22, 22],
+    popupAnchor: [0, -20]
   });
 }
 
-export function StaffLocationsMap({ staffRows, selectedUserId, onSelectStaff }) {
+function buildPopupContent(row) {
+  return `
+    <div class="staff-map-popup">
+      <div class="staff-map-popup__header">
+        <span class="staff-map-popup__avatar">${row.initials}</span>
+        <div>
+          <strong>${row.name}</strong>
+          <span>${row.role}</span>
+        </div>
+      </div>
+      <div class="staff-map-popup__meta">
+        <span>${row.department}</span>
+        <span>${row.airportZone || 'Unknown zone'}</span>
+        <span>Last seen ${row.recordedAt || 'Unknown'}</span>
+      </div>
+    </div>
+  `;
+}
+
+export function StaffLocationsMap({
+  staffRows,
+  selectedUserId,
+  activeZoneFilter = null,
+  onSelectStaff
+}) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const markersLayerRef = useRef(null);
+  const zonesLayerRef = useRef(null);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
     const map = L.map(containerRef.current, {
-      zoomControl: true,
+      zoomControl: false,
       attributionControl: true
     }).setView(MAP_CENTER, 15);
+
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
 
     L.tileLayer(DEFAULT_MAP_TILE_URL_TEMPLATE, {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -41,6 +86,7 @@ export function StaffLocationsMap({ staffRows, selectedUserId, onSelectStaff }) 
       [GOLDSON_AIRPORT_BOUNDS.north, GOLDSON_AIRPORT_BOUNDS.east]
     ], { padding: [24, 24] });
 
+    zonesLayerRef.current = L.layerGroup().addTo(map);
     markersLayerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
 
@@ -48,8 +94,38 @@ export function StaffLocationsMap({ staffRows, selectedUserId, onSelectStaff }) 
       map.remove();
       mapRef.current = null;
       markersLayerRef.current = null;
+      zonesLayerRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const zonesLayer = zonesLayerRef.current;
+    if (!map || !zonesLayer) return;
+
+    zonesLayer.clearLayers();
+
+    Object.entries(AIRPORT_ZONE_BOUNDS).forEach(([zoneName, bounds]) => {
+      const isActive = activeZoneFilter === zoneName;
+      const color = ZONE_COLORS[zoneName] || '#475569';
+
+      L.rectangle(
+        [
+          [bounds.south, bounds.west],
+          [bounds.north, bounds.east]
+        ],
+        {
+          color,
+          weight: isActive ? 2.5 : 1,
+          fillColor: color,
+          fillOpacity: isActive ? 0.18 : 0.06,
+          dashArray: isActive ? null : '6 4'
+        }
+      )
+        .bindTooltip(zoneName, { sticky: true, opacity: 0.92 })
+        .addTo(zonesLayer);
+    });
+  }, [activeZoneFilter]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -60,21 +136,21 @@ export function StaffLocationsMap({ staffRows, selectedUserId, onSelectStaff }) 
     const locatedStaff = staffRows.filter((row) => row.hasLocation);
 
     locatedStaff.forEach((row) => {
+      const isSelected = selectedUserId === row.userId;
       const marker = L.marker([row.latitude, row.longitude], {
-        icon: createStaffMarkerIcon(row.initials)
+        icon: createStaffMarkerIcon(row.initials, isSelected),
+        zIndexOffset: isSelected ? 1000 : 0
       });
 
-      marker.bindPopup(`
-        <strong>${row.name}</strong><br />
-        ${row.department}<br />
-        ${row.role}<br />
-        Last seen: ${row.recordedAt || 'Unknown'}
-      `);
+      marker.bindPopup(buildPopupContent(row), {
+        className: 'staff-map-popup-shell',
+        maxWidth: 260
+      });
 
       marker.on('click', () => onSelectStaff?.(row.userId));
       marker.addTo(layer);
 
-      if (selectedUserId === row.userId) {
+      if (isSelected) {
         marker.openPopup();
       }
     });
@@ -82,8 +158,22 @@ export function StaffLocationsMap({ staffRows, selectedUserId, onSelectStaff }) 
     if (selectedUserId) {
       const selected = locatedStaff.find((row) => row.userId === selectedUserId);
       if (selected) {
-        map.panTo([selected.latitude, selected.longitude]);
+        map.flyTo([selected.latitude, selected.longitude], Math.max(map.getZoom(), 16), {
+          animate: true,
+          duration: 0.6
+        });
+        return;
       }
+    }
+
+    if (locatedStaff.length === 1) {
+      map.flyTo([locatedStaff[0].latitude, locatedStaff[0].longitude], 16, { animate: true, duration: 0.6 });
+      return;
+    }
+
+    if (locatedStaff.length > 1) {
+      const bounds = L.latLngBounds(locatedStaff.map((row) => [row.latitude, row.longitude]));
+      map.fitBounds(bounds.pad(0.2), { animate: true, duration: 0.6 });
     }
   }, [staffRows, selectedUserId, onSelectStaff]);
 
