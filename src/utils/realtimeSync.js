@@ -13,6 +13,11 @@ export function subscribeWorkspaceRealtime(onChange) {
       { event: 'INSERT', schema: 'public', table: 'job_history' },
       () => onChange()
     )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'staff_positions' },
+      () => onChange()
+    )
     .subscribe();
 
   return () => {

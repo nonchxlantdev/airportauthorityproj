@@ -32,7 +32,9 @@ import { registerPwa } from './registerPwa.js';
 import { OfflineMapDownloadButton } from './components/OfflineMapDownloadButton.jsx';
 import { OfflinePlatformNotice } from './components/OfflinePlatformNotice.jsx';
 import { PendingSyncBadge } from './components/PendingSyncBadge.jsx';
+import { AreasLocationsView } from './components/AreasLocationsView.jsx';
 import { ToastProvider, useToast } from './components/ToastProvider.jsx';
+import { useStaffGpsReporter } from './hooks/useStaffGpsReporter.js';
 import { isOfflineCapable } from './utils/platformCapabilities.js';
 import { initializeNonCapablePlatformBehavior } from './utils/platformBehavior.js';
 import { exportJobsToCsv } from './utils/exportJobsCsv.js';
@@ -408,9 +410,11 @@ function LoginPage({ onLogin }) {
   );
 }
 
-function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, teams, setTeams, recentActivity, onLogout, onRefreshData }) {
+function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, teams, setTeams, staffPositions, recentActivity, onLogout, onRefreshData }) {
   const toast = useToast();
   const capabilities = getUserCapabilities(currentUser);
+  const shouldReportGps = currentUser.role !== 'Read-Only / Auditor';
+  useStaffGpsReporter(currentUser, { enabled: shouldReportGps });
   const [activeView, setActiveView] = useState(capabilities.canViewAllJobs ? 'dashboard' : 'my-tasks');
   const [selectedJob, setSelectedJob] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -949,7 +953,10 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, teams, setT
               onViewJob={(job) => setSelectedJob(job)}
             />
           )}
-          {['reports', 'departments', 'areas', 'settings'].includes(activeView) && (
+          {activeView === 'areas' && capabilities.canViewAllJobs && (
+            <AreasLocationsView users={users} staffPositions={staffPositions} />
+          )}
+          {['reports', 'departments', 'settings'].includes(activeView) && (
             <PlaceholderView activeView={activeView} />
           )}
         </section>
@@ -2524,6 +2531,7 @@ function App() {
           setUsers={setUsers}
           teams={teams}
           setTeams={setTeams}
+          staffPositions={staffPositions}
           recentActivity={recentActivity}
           onLogout={handleLogout}
           onRefreshData={() => refreshData(sessionUser)}

@@ -2001,6 +2001,115 @@ th {
   display: none;
 }
 
+.staff-locations-layout {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.9fr);
+}
+
+.staff-locations-map-panel,
+.staff-locations-list {
+  min-height: 100%;
+}
+
+.staff-locations-map-shell {
+  border: 1px solid #dce5ee;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.staff-locations-map {
+  height: 520px;
+  width: 100%;
+}
+
+.staff-location-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 520px;
+  overflow: auto;
+}
+
+.staff-location-row {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  text-align: left;
+  width: 100%;
+}
+
+.staff-location-row:hover,
+.staff-location-row.selected {
+  background: #f7fafe;
+  border-color: #c8daf5;
+}
+
+.staff-location-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.staff-location-copy strong,
+.staff-location-copy small,
+.staff-location-copy span {
+  display: block;
+}
+
+.staff-location-copy small,
+.staff-location-copy span {
+  color: #657483;
+  font-size: 0.82rem;
+}
+
+.staff-locations-note {
+  border-top: 1px solid #e8eef4;
+  color: #657483;
+  font-size: 0.85rem;
+  margin: 0.85rem 0 0;
+  padding-top: 0.85rem;
+}
+
+.staff-map-marker-wrap {
+  background: transparent;
+  border: 0;
+}
+
+.staff-map-marker {
+  align-items: center;
+  background: #004ca8;
+  border: 2px solid white;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 76, 168, 0.35);
+  color: white;
+  display: inline-flex;
+  font-size: 0.72rem;
+  font-weight: 700;
+  height: 36px;
+  justify-content: center;
+  width: 36px;
+}
+
+@media (max-width: 980px) {
+  .staff-locations-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .staff-locations-map {
+    height: 420px;
+  }
+
+  .staff-location-rows {
+    max-height: none;
+  }
+}
+
 .pending-sync-badge {
   background: #fff4df;
   border: 1px solid #efd39d;

@@ -3,6 +3,7 @@
 
 alter table public.jobs replica identity full;
 alter table public.job_history replica identity full;
+alter table public.staff_positions replica identity full;
 
 -- Add tables to the Realtime publication (ignore error if already added)
 do $$
@@ -15,6 +16,13 @@ end $$;
 do $$
 begin
   alter publication supabase_realtime add table public.job_history;
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.staff_positions;
 exception
   when duplicate_object then null;
 end $$;
