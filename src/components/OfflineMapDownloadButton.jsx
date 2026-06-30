@@ -42,13 +42,12 @@ export function OfflineMapDownloadButton() {
         type="button"
         onClick={handleDownload}
         disabled={!isConfigured || status === 'downloading'}
-        title={!isConfigured ? configMessage : 'Cache airport map tiles for offline use'}
+        title={!isConfigured ? configMessage : 'Cache Goldson Airport map tiles for offline use (OpenStreetMap)'}
       >
         <MapPin size={18} />
         <Download size={16} />
-        {label}
+        <span className="offline-map-button-label">{label}</span>
       </button>
-      {!isConfigured && <p className="offline-map-hint">{configMessage}</p>}
       {status === 'error' && <p className="form-error offline-map-error">{errorMessage}</p>}
     </div>
   );

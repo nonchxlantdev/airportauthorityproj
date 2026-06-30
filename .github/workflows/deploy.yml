@@ -46,6 +46,14 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_STAFF_POSITIONS_TABLE: staff_positions
+          VITE_MAP_TILE_URL_TEMPLATE: https://tile.openstreetmap.org/{z}/{x}/{y}.png
+          VITE_MAP_TILE_URL_REGEX: ^https://tile\.openstreetmap\.org/
+          VITE_MAP_BOUNDS_NORTH: "17.56"
+          VITE_MAP_BOUNDS_SOUTH: "17.515"
+          VITE_MAP_BOUNDS_EAST: "-88.275"
+          VITE_MAP_BOUNDS_WEST: "-88.325"
+          VITE_MAP_MIN_ZOOM: "14"
+          VITE_MAP_MAX_ZOOM: "18"
         run: npm run build
 
       - name: Upload artifact

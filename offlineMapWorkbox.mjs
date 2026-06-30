@@ -1,10 +1,10 @@
 /**
  * Build-time Workbox runtime caching rules for map assets.
- * Patterns come from .env regexes — no provider hardcoded.
  */
 
-function addRuntimeRule(rules, envKey, cacheName) {
-  const pattern = process.env[envKey];
+import { DEFAULT_MAP_TILE_URL_REGEX } from './offlineMapDefaults.mjs';
+
+function addRuntimeRule(rules, pattern, cacheName) {
   if (!pattern) return;
 
   try {
@@ -23,14 +23,16 @@ function addRuntimeRule(rules, envKey, cacheName) {
       }
     });
   } catch (error) {
-    console.warn(`[PWA] Skipping ${envKey}: invalid regex (${error.message})`);
+    console.warn(`[PWA] Skipping map cache rule (${cacheName}): invalid regex (${error.message})`);
   }
 }
 
 export function getMapRuntimeCaching() {
   const rules = [];
-  addRuntimeRule(rules, 'VITE_MAP_TILE_URL_REGEX', 'map-tiles');
-  addRuntimeRule(rules, 'VITE_MAP_STYLE_URL_REGEX', 'map-styles');
-  addRuntimeRule(rules, 'VITE_MAP_GLYPHS_URL_REGEX', 'map-glyphs');
+  const tilePattern = process.env.VITE_MAP_TILE_URL_REGEX || DEFAULT_MAP_TILE_URL_REGEX;
+
+  addRuntimeRule(rules, tilePattern, 'map-tiles');
+  addRuntimeRule(rules, process.env.VITE_MAP_STYLE_URL_REGEX, 'map-styles');
+  addRuntimeRule(rules, process.env.VITE_MAP_GLYPHS_URL_REGEX, 'map-glyphs');
   return rules;
 }

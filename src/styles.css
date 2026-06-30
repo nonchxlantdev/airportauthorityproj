@@ -1986,16 +1986,19 @@ th {
   white-space: nowrap;
 }
 
-.offline-map-hint,
-.offline-map-error {
-  font-size: 0.75rem;
-  margin: 0;
-  max-width: 16rem;
-  text-align: right;
+.offline-map-button-label {
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.offline-map-error {
-  color: #b63b3b;
+.user-tools .offline-map-download {
+  flex-direction: row;
+}
+
+.user-tools .offline-map-error {
+  display: none;
 }
 
 .pending-sync-badge {
