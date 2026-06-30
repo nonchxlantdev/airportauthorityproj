@@ -179,6 +179,7 @@ export function AreasLocationsView({ users, staffPositions }) {
             staffRows={filteredRows}
             selectedUserId={selectedUserId}
             activeZoneFilter={locationFilter !== 'All locations' && locationFilter !== 'No location' ? locationFilter : null}
+            refocusToken={`${locationFilter}:${searchQuery.trim().toLowerCase()}`}
             onSelectStaff={handleSelectStaff}
           />
         </div>

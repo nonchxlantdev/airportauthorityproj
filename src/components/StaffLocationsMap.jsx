@@ -56,16 +56,38 @@ function buildPopupContent(row) {
   `;
 }
 
+function fitMapToStaff(map, locatedStaff) {
+  if (!locatedStaff.length) {
+    map.fitBounds([
+      [GOLDSON_AIRPORT_BOUNDS.south, GOLDSON_AIRPORT_BOUNDS.west],
+      [GOLDSON_AIRPORT_BOUNDS.north, GOLDSON_AIRPORT_BOUNDS.east]
+    ], { padding: [24, 24] });
+    return;
+  }
+
+  if (locatedStaff.length === 1) {
+    map.setView([locatedStaff[0].latitude, locatedStaff[0].longitude], 16);
+    return;
+  }
+
+  const bounds = L.latLngBounds(locatedStaff.map((row) => [row.latitude, row.longitude]));
+  map.fitBounds(bounds.pad(0.2));
+}
+
 export function StaffLocationsMap({
   staffRows,
   selectedUserId,
   activeZoneFilter = null,
+  refocusToken = '',
   onSelectStaff
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const markersLayerRef = useRef(null);
   const zonesLayerRef = useRef(null);
+  const markersByUserIdRef = useRef(new Map());
+  const lastRefocusTokenRef = useRef(null);
+  const lastSelectedUserIdRef = useRef(null);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -95,6 +117,7 @@ export function StaffLocationsMap({
       mapRef.current = null;
       markersLayerRef.current = null;
       zonesLayerRef.current = null;
+      markersByUserIdRef.current.clear();
     };
   }, []);
 
@@ -132,50 +155,69 @@ export function StaffLocationsMap({
     const layer = markersLayerRef.current;
     if (!map || !layer) return;
 
-    layer.clearLayers();
     const locatedStaff = staffRows.filter((row) => row.hasLocation);
+    const visibleUserIds = new Set(locatedStaff.map((row) => row.userId));
+
+    for (const [userId, marker] of markersByUserIdRef.current.entries()) {
+      if (!visibleUserIds.has(userId)) {
+        layer.removeLayer(marker);
+        markersByUserIdRef.current.delete(userId);
+      }
+    }
 
     locatedStaff.forEach((row) => {
       const isSelected = selectedUserId === row.userId;
-      const marker = L.marker([row.latitude, row.longitude], {
-        icon: createStaffMarkerIcon(row.initials, isSelected),
-        zIndexOffset: isSelected ? 1000 : 0
-      });
+      let marker = markersByUserIdRef.current.get(row.userId);
 
-      marker.bindPopup(buildPopupContent(row), {
-        className: 'staff-map-popup-shell',
-        maxWidth: 260
-      });
+      if (marker) {
+        marker.setLatLng([row.latitude, row.longitude]);
+        marker.setIcon(createStaffMarkerIcon(row.initials, isSelected));
+        marker.setPopupContent(buildPopupContent(row));
+      } else {
+        marker = L.marker([row.latitude, row.longitude], {
+          icon: createStaffMarkerIcon(row.initials, isSelected),
+          zIndexOffset: isSelected ? 1000 : 0
+        });
 
-      marker.on('click', () => onSelectStaff?.(row.userId));
-      marker.addTo(layer);
+        marker.bindPopup(buildPopupContent(row), {
+          className: 'staff-map-popup-shell',
+          maxWidth: 260
+        });
+
+        marker.on('click', () => onSelectStaff?.(row.userId));
+        marker.addTo(layer);
+        markersByUserIdRef.current.set(row.userId, marker);
+      }
+
+      marker.setZIndexOffset(isSelected ? 1000 : 0);
 
       if (isSelected) {
         marker.openPopup();
       }
     });
 
-    if (selectedUserId) {
+    const refocusChanged = refocusToken !== lastRefocusTokenRef.current;
+    const selectionChanged = selectedUserId !== lastSelectedUserIdRef.current;
+
+    if (refocusChanged) {
+      lastRefocusTokenRef.current = refocusToken;
+      fitMapToStaff(map, locatedStaff);
+      lastSelectedUserIdRef.current = selectedUserId;
+      return;
+    }
+
+    if (selectionChanged && selectedUserId) {
       const selected = locatedStaff.find((row) => row.userId === selectedUserId);
       if (selected) {
         map.flyTo([selected.latitude, selected.longitude], Math.max(map.getZoom(), 16), {
           animate: true,
           duration: 0.6
         });
-        return;
       }
     }
 
-    if (locatedStaff.length === 1) {
-      map.flyTo([locatedStaff[0].latitude, locatedStaff[0].longitude], 16, { animate: true, duration: 0.6 });
-      return;
-    }
-
-    if (locatedStaff.length > 1) {
-      const bounds = L.latLngBounds(locatedStaff.map((row) => [row.latitude, row.longitude]));
-      map.fitBounds(bounds.pad(0.2), { animate: true, duration: 0.6 });
-    }
-  }, [staffRows, selectedUserId, onSelectStaff]);
+    lastSelectedUserIdRef.current = selectedUserId;
+  }, [staffRows, selectedUserId, refocusToken, onSelectStaff]);
 
   return (
     <div className="staff-locations-map-shell">

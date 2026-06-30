@@ -39,7 +39,7 @@ import { useStaffGpsReporter } from './hooks/useStaffGpsReporter.js';
 import { isOfflineCapable } from './utils/platformCapabilities.js';
 import { initializeNonCapablePlatformBehavior } from './utils/platformBehavior.js';
 import { exportJobsToCsv } from './utils/exportJobsCsv.js';
-import { subscribeWorkspaceRealtime } from './utils/realtimeSync.js';
+import { subscribeWorkspaceRealtime, mergeStaffPositionRow } from './utils/realtimeSync.js';
 import {
   buildQueuedAttachment,
   getOfflineUserMessage,
@@ -2440,8 +2440,14 @@ function App() {
   useEffect(() => {
     if (!sessionUser) return undefined;
 
-    return subscribeWorkspaceRealtime(() => {
-      refreshData(sessionUser).catch(() => {});
+    return subscribeWorkspaceRealtime({
+      onWorkspaceChange: () => {
+        refreshData(sessionUser).catch(() => {});
+      },
+      onStaffPositionChange: (payload) => {
+        if (!staffPositionsTableConfigured()) return;
+        setStaffPositions((current) => mergeStaffPositionRow(current, payload));
+      }
     });
   }, [sessionUser]);
 

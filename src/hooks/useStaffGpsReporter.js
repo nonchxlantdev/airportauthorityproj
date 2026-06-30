@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { shouldReportGpsPosition } from '../utils/gpsThrottle.js';
 import { recordStaffGpsPosition, staffPositionsTableConfigured } from '../utils/workspaceData.js';
 
 const REPORT_INTERVAL_MS = 2 * 60 * 1000;
@@ -13,6 +14,7 @@ const GEO_OPTIONS = {
 export function useStaffGpsReporter(user, { enabled = true } = {}) {
   const [status, setStatus] = useState(() => (enabled ? 'pending' : 'not-required'));
   const statusRef = useRef(status);
+  const lastReportRef = useRef(null);
 
   useEffect(() => {
     statusRef.current = status;
@@ -23,11 +25,24 @@ export function useStaffGpsReporter(user, { enabled = true } = {}) {
 
     setStatus('granted');
 
+    const latitude = position.coords.latitude;
+    const longitude = position.coords.longitude;
+
+    if (!shouldReportGpsPosition(latitude, longitude, lastReportRef.current)) {
+      return;
+    }
+
+    lastReportRef.current = {
+      latitude,
+      longitude,
+      reportedAt: Date.now()
+    };
+
     try {
       await recordStaffGpsPosition({
         userId: user.id,
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
+        latitude,
+        longitude,
         accuracyMeters: position.coords.accuracy
       });
     } catch {
