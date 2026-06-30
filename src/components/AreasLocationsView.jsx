@@ -4,12 +4,10 @@ import {
   Navigation,
   Radio,
   Search,
-  SlidersHorizontal,
   Users,
   WifiOff
 } from 'lucide-react';
 import { areas } from '../mockData.js';
-import { STAFF_LOCATION_FILTERS } from '../config/airportLocations.js';
 import { StaffLocationsMap } from './StaffLocationsMap.jsx';
 import {
   buildStaffLocationRows,
@@ -39,12 +37,11 @@ function StaffStatusBadge({ row }) {
 export function AreasLocationsView({ users, staffPositions }) {
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [locationFilter, setLocationFilter] = useState('All locations');
 
   const staffRows = useMemo(() => buildStaffLocationRows(users, staffPositions), [users, staffPositions]);
   const filteredRows = useMemo(
-    () => filterStaffRows(staffRows, { search: searchQuery, locationFilter }),
-    [staffRows, searchQuery, locationFilter]
+    () => filterStaffRows(staffRows, { search: searchQuery }),
+    [staffRows, searchQuery]
   );
   const filteredOnMap = useMemo(() => staffLocationsWithCoordinates(filteredRows), [filteredRows]);
   const summary = useMemo(() => summarizeStaffLocations(staffRows), [staffRows]);
@@ -52,12 +49,6 @@ export function AreasLocationsView({ users, staffPositions }) {
 
   function handleSelectStaff(userId) {
     setSelectedUserId((current) => (current === userId ? null : userId));
-  }
-
-  function clearFilters() {
-    setSearchQuery('');
-    setLocationFilter('All locations');
-    setSelectedUserId(null);
   }
 
   if (!tableConfigured) {
@@ -85,7 +76,7 @@ export function AreasLocationsView({ users, staffPositions }) {
         <div>
           <p className="staff-locations-eyebrow">Live operations</p>
           <h1>Areas / Locations</h1>
-          <p>Track active staff across {areas[0]} with live GPS and zone filters.</p>
+          <p>Track active staff across {areas[0]} with live GPS on the map.</p>
         </div>
         <div className="staff-locations-stats">
           <article className="staff-stat-card">
@@ -106,7 +97,7 @@ export function AreasLocationsView({ users, staffPositions }) {
             <MapPin size={18} />
             <div>
               <strong>{filteredOnMap.length}</strong>
-              <span>Matching filter</span>
+              <span>In search results</span>
             </div>
           </article>
         </div>
@@ -123,47 +114,11 @@ export function AreasLocationsView({ users, staffPositions }) {
             aria-label="Search staff"
           />
         </label>
-        <label className="staff-locations-select">
-          <SlidersHorizontal size={16} aria-hidden="true" />
-          <select
-            value={locationFilter}
-            onChange={(event) => {
-              setLocationFilter(event.target.value);
-              setSelectedUserId(null);
-            }}
-            aria-label="Filter by location"
-          >
-            {STAFF_LOCATION_FILTERS.map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
-        </label>
-        {(searchQuery || locationFilter !== 'All locations') && (
-          <button type="button" className="staff-locations-clear" onClick={clearFilters}>
-            Clear filters
+        {searchQuery && (
+          <button type="button" className="staff-locations-clear" onClick={() => setSearchQuery('')}>
+            Clear search
           </button>
         )}
-      </div>
-
-      <div className="staff-location-filters" role="tablist" aria-label="Quick location filters">
-        {STAFF_LOCATION_FILTERS.map((option) => (
-          <button
-            key={option}
-            type="button"
-            role="tab"
-            aria-selected={locationFilter === option}
-            className={locationFilter === option ? 'staff-filter-chip active' : 'staff-filter-chip'}
-            onClick={() => {
-              setLocationFilter(option);
-              setSelectedUserId(null);
-            }}
-          >
-            {option}
-            {option !== 'All locations' && option !== 'No location' && summary.zones[option] ? (
-              <span className="staff-filter-chip__count">{summary.zones[option]}</span>
-            ) : null}
-          </button>
-        ))}
       </div>
 
       <section className="staff-locations-layout">
@@ -171,15 +126,14 @@ export function AreasLocationsView({ users, staffPositions }) {
           <div className="staff-map-panel-header">
             <div>
               <h2><MapPin size={18} /> Live staff map</h2>
-              <p>{filteredOnMap.length} staff visible · zones highlighted on map</p>
+              <p>{filteredOnMap.length} staff visible on map</p>
             </div>
             <span className="staff-live-pill"><span className="staff-live-dot" /> Real-time GPS</span>
           </div>
           <StaffLocationsMap
             staffRows={filteredRows}
             selectedUserId={selectedUserId}
-            activeZoneFilter={locationFilter !== 'All locations' && locationFilter !== 'No location' ? locationFilter : null}
-            refocusToken={`${locationFilter}:${searchQuery.trim().toLowerCase()}`}
+            refocusToken={searchQuery.trim().toLowerCase()}
             onSelectStaff={handleSelectStaff}
           />
         </div>
@@ -208,10 +162,7 @@ export function AreasLocationsView({ users, staffPositions }) {
                   </span>
                   <span className="staff-location-card__meta">{row.department} · {row.role}</span>
                   {row.hasLocation ? (
-                    <>
-                      <span className="staff-location-card__zone">{row.airportZone}</span>
-                      <span className="staff-location-card__time">Last seen {row.recordedAt}</span>
-                    </>
+                    <span className="staff-location-card__time">Last seen {row.recordedAt}</span>
                   ) : (
                     <span className="staff-location-card__time muted-line">Waiting for GPS signal</span>
                   )}
@@ -219,8 +170,8 @@ export function AreasLocationsView({ users, staffPositions }) {
               </button>
             )) : (
               <EmptyState
-                title="No staff match your filters"
-                description="Try another search term or location zone."
+                title="No staff match your search"
+                description="Try another name, role, or department."
                 compact
               />
             )}

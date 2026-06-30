@@ -1,26 +1,12 @@
 import { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { AIRPORT_ZONE_BOUNDS } from '../config/airportLocations.js';
 import { GOLDSON_AIRPORT_BOUNDS, DEFAULT_MAP_TILE_URL_TEMPLATE } from '../config/offlineMapDefaults.js';
 
 const MAP_CENTER = [
   (GOLDSON_AIRPORT_BOUNDS.north + GOLDSON_AIRPORT_BOUNDS.south) / 2,
   (GOLDSON_AIRPORT_BOUNDS.east + GOLDSON_AIRPORT_BOUNDS.west) / 2
 ];
-
-const ZONE_COLORS = {
-  'Terminal 1': '#2563eb',
-  'Terminal 2': '#0891b2',
-  'Cargo Area': '#7c3aed',
-  'Runway / Apron': '#ea580c',
-  'Parking Area': '#059669',
-  'VIP Lounge': '#db2777',
-  'Immigration Area': '#4f46e5',
-  'Customs Area': '#0d9488',
-  'Restrooms': '#64748b',
-  'Other Airport Location': '#475569'
-};
 
 function createStaffMarkerIcon(initials, isSelected) {
   return L.divIcon({
@@ -49,7 +35,6 @@ function buildPopupContent(row) {
       </div>
       <div class="staff-map-popup__meta">
         <span>${row.department}</span>
-        <span>${row.airportZone || 'Unknown zone'}</span>
         <span>Last seen ${row.recordedAt || 'Unknown'}</span>
       </div>
     </div>
@@ -77,14 +62,12 @@ function fitMapToStaff(map, locatedStaff) {
 export function StaffLocationsMap({
   staffRows,
   selectedUserId,
-  activeZoneFilter = null,
   refocusToken = '',
   onSelectStaff
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const markersLayerRef = useRef(null);
-  const zonesLayerRef = useRef(null);
   const markersByUserIdRef = useRef(new Map());
   const lastRefocusTokenRef = useRef(null);
   const lastSelectedUserIdRef = useRef(null);
@@ -108,7 +91,6 @@ export function StaffLocationsMap({
       [GOLDSON_AIRPORT_BOUNDS.north, GOLDSON_AIRPORT_BOUNDS.east]
     ], { padding: [24, 24] });
 
-    zonesLayerRef.current = L.layerGroup().addTo(map);
     markersLayerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
 
@@ -116,39 +98,9 @@ export function StaffLocationsMap({
       map.remove();
       mapRef.current = null;
       markersLayerRef.current = null;
-      zonesLayerRef.current = null;
       markersByUserIdRef.current.clear();
     };
   }, []);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    const zonesLayer = zonesLayerRef.current;
-    if (!map || !zonesLayer) return;
-
-    zonesLayer.clearLayers();
-
-    Object.entries(AIRPORT_ZONE_BOUNDS).forEach(([zoneName, bounds]) => {
-      const isActive = activeZoneFilter === zoneName;
-      const color = ZONE_COLORS[zoneName] || '#475569';
-
-      L.rectangle(
-        [
-          [bounds.south, bounds.west],
-          [bounds.north, bounds.east]
-        ],
-        {
-          color,
-          weight: isActive ? 2.5 : 1,
-          fillColor: color,
-          fillOpacity: isActive ? 0.18 : 0.06,
-          dashArray: isActive ? null : '6 4'
-        }
-      )
-        .bindTooltip(zoneName, { sticky: true, opacity: 0.92 })
-        .addTo(zonesLayer);
-    });
-  }, [activeZoneFilter]);
 
   useEffect(() => {
     const map = mapRef.current;

@@ -1,4 +1,3 @@
-import { inferAirportZone } from '../config/airportLocations.js';
 import { formatDateTime } from './dateFormat.js';
 
 export function buildStaffLocationRows(users, staffPositions = []) {
@@ -26,8 +25,7 @@ export function buildStaffLocationRows(users, staffPositions = []) {
         longitude,
         accuracyMeters: position?.accuracy_meters ?? null,
         recordedAt: position?.recorded_at ? formatDateTime(new Date(position.recorded_at)) : null,
-        hasLocation,
-        airportZone: hasLocation ? inferAirportZone(latitude, longitude) : null
+        hasLocation
       };
     })
     .sort((left, right) => {
@@ -40,43 +38,24 @@ export function staffLocationsWithCoordinates(staffRows) {
   return staffRows.filter((row) => row.hasLocation);
 }
 
-export function filterStaffRows(staffRows, { search = '', locationFilter = 'All locations' } = {}) {
+export function filterStaffRows(staffRows, { search = '' } = {}) {
   const query = search.trim().toLowerCase();
+  if (!query) return staffRows;
 
-  return staffRows.filter((row) => {
-    const matchesSearch = !query || [
-      row.name,
-      row.email,
-      row.department,
-      row.role,
-      row.airportZone
-    ].join(' ').toLowerCase().includes(query);
-
-    let matchesLocation = true;
-    if (locationFilter === 'All locations') {
-      matchesLocation = true;
-    } else if (locationFilter === 'No location') {
-      matchesLocation = !row.hasLocation;
-    } else {
-      matchesLocation = row.airportZone === locationFilter;
-    }
-
-    return matchesSearch && matchesLocation;
-  });
+  return staffRows.filter((row) => [
+    row.name,
+    row.email,
+    row.department,
+    row.role
+  ].join(' ').toLowerCase().includes(query));
 }
 
 export function summarizeStaffLocations(staffRows) {
   const onMap = staffRows.filter((row) => row.hasLocation).length;
-  const zones = staffRows.reduce((counts, row) => {
-    if (!row.airportZone) return counts;
-    counts[row.airportZone] = (counts[row.airportZone] || 0) + 1;
-    return counts;
-  }, {});
 
   return {
     total: staffRows.length,
     onMap,
-    offline: staffRows.length - onMap,
-    zones
+    offline: staffRows.length - onMap
   };
 }
