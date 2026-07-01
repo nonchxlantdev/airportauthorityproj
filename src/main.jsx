@@ -34,8 +34,6 @@ import { OfflinePlatformNotice } from './components/OfflinePlatformNotice.jsx';
 import { PendingSyncBadge } from './components/PendingSyncBadge.jsx';
 import { AreasLocationsView } from './components/AreasLocationsView.jsx';
 import { ToastProvider, useToast } from './components/ToastProvider.jsx';
-import { StaffLocationGate } from './components/StaffLocationGate.jsx';
-import { useStaffGpsReporter } from './hooks/useStaffGpsReporter.js';
 import { isOfflineCapable } from './utils/platformCapabilities.js';
 import { initializeNonCapablePlatformBehavior } from './utils/platformBehavior.js';
 import { exportJobsToCsv } from './utils/exportJobsCsv.js';
@@ -48,7 +46,7 @@ import {
   queuePhotoUploads,
   runOfflineCapableWrite
 } from './utils/offlineWrites.js';
-import { canQueueJobStatusUpdate, mustShareLocation } from './utils/offlinePermissions.js';
+import { canQueueJobStatusUpdate } from './utils/offlinePermissions.js';
 import { setupOfflineSyncListeners } from './utils/offlineSync.js';
 import {
   hydrateWorkspaceFromCache,
@@ -414,11 +412,6 @@ function LoginPage({ onLogin }) {
 function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, teams, setTeams, staffPositions, recentActivity, onLogout, onRefreshData }) {
   const toast = useToast();
   const capabilities = getUserCapabilities(currentUser);
-  const locationTrackingRequired = mustShareLocation(currentUser);
-  const { status: locationStatus, retry: retryLocation } = useStaffGpsReporter(currentUser, {
-    enabled: locationTrackingRequired
-  });
-  const showLocationGate = locationTrackingRequired && (locationStatus === 'denied' || locationStatus === 'unavailable');
   const [activeView, setActiveView] = useState(capabilities.canViewAllJobs ? 'dashboard' : 'my-tasks');
   const [selectedJob, setSelectedJob] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -886,17 +879,7 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, teams, setT
   }
 
   return (
-    <>
-      {showLocationGate && (
-        <StaffLocationGate
-          status={locationStatus}
-          onRetry={retryLocation}
-        />
-      )}
-      <div
-        className={isSidebarCollapsed ? 'app-shell sidebar-collapsed' : 'app-shell'}
-        aria-hidden={showLocationGate || undefined}
-      >
+    <div className={isSidebarCollapsed ? 'app-shell sidebar-collapsed' : 'app-shell'}>
       <Sidebar activeView={activeView} capabilities={capabilities} onNavigate={setActiveView} onLogout={onLogout} isCollapsed={isSidebarCollapsed} />
       <main className="main-content">
         <TopBar
@@ -988,8 +971,7 @@ function DashboardApp({ currentUser, jobs, setJobs, users, setUsers, teams, setT
           onClose={() => setSelectedJob(null)}
         />
       )}
-      </div>
-    </>
+    </div>
   );
 }
 

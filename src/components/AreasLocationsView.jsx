@@ -179,7 +179,7 @@ export function AreasLocationsView({ users, staffPositions }) {
 
           {!summary.onMap && staffRows.length > 0 && (
             <p className="staff-locations-note">
-              All signed-in users share location automatically. Staff appear here once GPS is active on their device.
+              Staff appear on the map when they allow location access on their device.
             </p>
           )}
         </aside>
